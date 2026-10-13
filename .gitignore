@@ -1,0 +1,39 @@
+# Flutter, Dart and pub
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+**/doc/api/
+migrate_working_dir/
+
+# Generated from lib/l10n/*.arb by `flutter gen-l10n`, which every
+# `flutter pub get` and every build runs.
+/lib/l10n/app_localizations*.dart
+
+# Not ignored on purpose: the icons flutter_launcher_icons generates into
+# windows/ and macos/. A build needs them and does not run the generator.
+
+# Debug symbols and obfuscation maps of release builds
+app.*.symbols
+app.*.map.json
+
+# Editors
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.history
+.atom/
+
+# Operating systems
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Miscellaneous
+*.log
+*.swp
+*.tmp

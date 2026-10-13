@@ -1,0 +1,605 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:libtorrent_dart/libtorrent_dart.dart' as lt;
+import 'package:path/path.dart' as p;
+
+enum TorrentState { paused, checking, metadata, downloading, seeding, error }
+
+class Torrent {
+  const Torrent({
+    required this.id,
+    required this.name,
+    required this.savePath,
+    required this.state,
+    required this.progress,
+    required this.size,
+    required this.done,
+    required this.downloadRate,
+    required this.uploadRate,
+    required this.uploaded,
+    required this.peers,
+    required this.seeds,
+    required this.added,
+    required this.error,
+  });
+
+  final String id;
+  final String name;
+  final String savePath;
+  final TorrentState state;
+
+  /// 0..1
+  final double progress;
+  final int size;
+  final int done;
+
+  /// Bytes per second.
+  final int downloadRate;
+  final int uploadRate;
+
+  /// Bytes sent to other peers over the whole life of the torrent.
+  final int uploaded;
+  final int peers;
+  final int seeds;
+
+  /// Unix time the torrent was added at.
+  final int added;
+  final String error;
+
+  bool get isPaused => state == TorrentState.paused;
+  bool get isComplete => size > 0 && done >= size;
+
+  /// The state to present: a finished download that was stopped is still
+  /// first of all finished, not paused.
+  TorrentState get shownState =>
+      isPaused && isComplete ? TorrentState.seeding : state;
+
+  /// Time left at the current speed, null when it cannot be estimated.
+  Duration? get eta {
+    if (state != TorrentState.downloading || downloadRate <= 0) return null;
+    return Duration(seconds: (size - done) ~/ downloadRate);
+  }
+}
+
+class EngineException implements Exception {
+  const EngineException(this.code, this.message);
+
+  /// Stable identifier, e.g. "duplicate" or "bad_magnet".
+  final String code;
+  final String message;
+
+  @override
+  String toString() => 'EngineException($code): $message';
+}
+
+/// The torrent engine: libtorrent-rasterbar, the library qBittorrent is built
+/// on, through the libtorrent_dart package.
+///
+/// It keeps its own files in the state directory given to [start]:
+///   torrents.json        the list of torrents
+///   resume/`id`.resume   libtorrent resume data of each torrent
+///   session.dat          session state, most importantly the DHT nodes
+class TorrentEngine {
+  lt.Session? _session;
+  late String _stateDir;
+  final _entries = <String, _Entry>{};
+  DateTime _lastAutosave = DateTime.now();
+
+  static const _autosaveInterval = Duration(seconds: 30);
+
+  File get _indexFile => File(p.join(_stateDir, 'torrents.json'));
+  File get _sessionFile => File(p.join(_stateDir, 'session.dat'));
+  File _resumeFile(String id) =>
+      File(p.join(_stateDir, 'resume', '$id.resume'));
+
+  /// Starts the session and restores the torrents of the previous run.
+  /// Rate limits are in bytes per second, 0 means unlimited. Returns the
+  /// libtorrent version.
+  String start({
+    required String stateDir,
+    required int listenPort,
+    required int downloadLimit,
+    required int uploadLimit,
+  }) => _wrap('start_failed', () {
+    if (_session == null) {
+      _stateDir = stateDir;
+      Directory(p.join(stateDir, 'resume')).createSync(recursive: true);
+      final session = _createSession();
+      _applySettings(session, listenPort, downloadLimit, uploadLimit);
+      _session = session;
+      _restore(session);
+    }
+    return lt.getLibtorrentVersion();
+  });
+
+  void addMagnet(String uri, String savePath) {
+    final session = _running;
+    final lt.MagnetUriInfo info;
+    try {
+      info = lt.parseMagnetUri(uri);
+    } on lt.LibtorrentException catch (e) {
+      throw EngineException('bad_magnet', e.message);
+    }
+    final id = info.infohashHex.toLowerCase();
+    if (id.isEmpty) throw const EngineException('bad_magnet', 'no info-hash');
+    _checkNew(id);
+    _wrap('add_failed', () {
+      final handle = session.addMagnet(magnetUri: uri, savePath: savePath);
+      _adopt(id, handle, name: info.name, savePath: savePath, magnet: uri);
+    });
+  }
+
+  void addFile(String torrentPath, String savePath) {
+    final session = _running;
+    final Uint8List data;
+    try {
+      data = File(torrentPath).readAsBytesSync();
+    } on FileSystemException catch (e) {
+      throw EngineException('unreadable', e.message);
+    }
+    final lt.TorrentFileInfo info;
+    try {
+      info = lt.loadTorrentFile(torrentPath);
+    } on lt.LibtorrentException catch (e) {
+      throw EngineException('bad_torrent', e.message);
+    }
+    final id = info.infohashHex.toLowerCase();
+    _checkNew(id);
+    _wrap('add_failed', () {
+      final handle = session.addTorrentData(
+        torrentData: data,
+        savePath: savePath,
+      );
+      _adopt(id, handle, name: info.name, savePath: savePath, magnet: '');
+    });
+  }
+
+  /// The state of every torrent. Also writes resume data when it is due.
+  List<Torrent> poll() {
+    _running;
+    final now = DateTime.now();
+    final autosave = now.difference(_lastAutosave) >= _autosaveInterval;
+    if (autosave) _lastAutosave = now;
+
+    final result = <Torrent>[];
+    var indexChanged = false;
+    for (final entry in _entries.values) {
+      final lt.TorrentStatus status;
+      try {
+        status = entry.handle.getStatus();
+      } on lt.LibtorrentException {
+        continue;
+      }
+      final finished =
+          status.state == lt.LibtorrentTorrentState.finished ||
+          status.state == lt.LibtorrentTorrentState.seeding;
+
+      // Metadata of a magnet link has arrived: its real name is known now.
+      final gotMetadata = !entry.hasMetadata && status.totalWanted > 0;
+      if (gotMetadata) {
+        entry.hasMetadata = true;
+        final name = _nameOf(entry.handle);
+        if (name.isNotEmpty) entry.name = name;
+        indexChanged = true;
+      }
+      final justFinished = finished && !entry.finished;
+      entry.finished = finished;
+      if (gotMetadata ||
+          justFinished ||
+          (autosave && _needsSave(entry.handle))) {
+        _saveResume(entry);
+      }
+
+      result.add(
+        Torrent(
+          id: entry.id,
+          name: entry.name.isEmpty ? entry.id : entry.name,
+          savePath: entry.savePath,
+          state: _stateOf(status),
+          progress: status.progress.clamp(0, 1).toDouble(),
+          size: status.totalWanted,
+          done: status.totalWantedDone,
+          downloadRate: status.downloadPayloadRate.round(),
+          uploadRate: status.uploadPayloadRate.round(),
+          uploaded: status.allTimeUpload,
+          peers: status.numPeers,
+          seeds: status.numSeeds,
+          added: entry.added,
+          error: status.error,
+        ),
+      );
+    }
+    if (indexChanged) _saveIndex();
+    return result;
+  }
+
+  void pause(String id) => _wrap('failed', () {
+    final entry = _find(id);
+    entry.handle.unsetFlags(lt.LibtorrentTorrentFlags.autoManaged);
+    entry.handle.pause();
+    entry.paused = true;
+    _saveIndex();
+    _saveResume(entry);
+  });
+
+  void resume(String id) => _wrap('failed', () {
+    final entry = _find(id);
+    entry.handle.clearError();
+    entry.handle.unsetFlags(lt.LibtorrentTorrentFlags.autoManaged);
+    entry.handle.resume();
+    entry.paused = false;
+    _saveIndex();
+  });
+
+  void remove(String id, {required bool deleteFiles}) => _wrap('failed', () {
+    final entry = _find(id);
+    _running.removeTorrent(entry.handle, deleteFiles: deleteFiles);
+    _entries.remove(id);
+    _saveIndex();
+    final resume = _resumeFile(id);
+    if (resume.existsSync()) resume.deleteSync();
+  });
+
+  /// Bytes per second, 0 means unlimited.
+  void setRateLimits(int download, int upload) => _wrap('failed', () {
+    final session = _running;
+    session.setDownloadRateLimit(download > 0 ? download : 0);
+    session.setUploadRateLimit(upload > 0 ? upload : 0);
+  });
+
+  /// Saves the state of every torrent and stops the session.
+  void shutdown() {
+    final session = _session;
+    if (session == null) return;
+    _session = null;
+    try {
+      session.pause();
+      for (final entry in _entries.values) {
+        _saveResume(entry);
+      }
+      _saveIndex();
+      _write(_sessionFile, session.getState());
+    } on Object {
+      // Closing must go on: whatever was saved earlier still stands.
+    } finally {
+      _entries.clear();
+      session.close();
+    }
+  }
+
+  // ------------------------------------------------------------ session ----
+
+  lt.Session get _running =>
+      _session ??
+      (throw const EngineException('not_running', 'the engine is not running'));
+
+  lt.Session _createSession() {
+    try {
+      if (_sessionFile.existsSync()) {
+        return lt.createSessionFromState(_sessionFile.readAsBytesSync());
+      }
+    } on Object {
+      // A damaged state file only costs a slower DHT start.
+    }
+    return lt.createSession();
+  }
+
+  /// The network and disk defaults of qBittorrent, so that the same library
+  /// behaves the same way here.
+  void _applySettings(lt.Session s, int port, int download, int upload) {
+    const ints = {
+      _Setting.alertMask: 0, // nothing reads the alerts
+      _Setting.listenQueueSize: 30,
+      _Setting.mixedModeAlgorithm: 0, // prefer TCP
+      _Setting.connectionsLimit: 500,
+      _Setting.unchokeSlotsLimit: 20,
+      _Setting.connectionSpeed: 30,
+      _Setting.requestQueueTime: 3,
+      _Setting.peerTurnover: 4,
+      _Setting.peerTurnoverCutoff: 90,
+      _Setting.peerTurnoverInterval: 300,
+      _Setting.chokingAlgorithm: 0, // fixed slots
+      _Setting.seedChokingAlgorithm: 1, // fastest upload
+      _Setting.sendBufferWatermark: 500 * 1024,
+      _Setting.sendBufferLowWatermark: 10 * 1024,
+      _Setting.sendBufferWatermarkFactor: 50,
+      _Setting.stopTrackerTimeout: 2,
+      _Setting.aioThreads: 10,
+      _Setting.checkingMemUsage: 2048, // 32 MiB in 16 KiB blocks
+      // No queue: every torrent is active at once.
+      _Setting.activeDownloads: -1,
+      _Setting.activeSeeds: -1,
+      _Setting.activeLimit: -1,
+      _Setting.activeTrackerLimit: -1,
+      _Setting.activeDhtLimit: -1,
+      _Setting.activeLsdLimit: -1,
+      _Setting.outEncPolicy: lt.LibtorrentEncryptionPolicy.enabled,
+      _Setting.inEncPolicy: lt.LibtorrentEncryptionPolicy.enabled,
+      _Setting.allowedEncLevel: lt.LibtorrentEncryptionLevel.both,
+    };
+    const bools = {
+      _Setting.enableDht: true,
+      _Setting.enableLsd: true,
+      _Setting.enableUpnp: true,
+      _Setting.enableNatpmp: true,
+      _Setting.enableIncomingUtp: true,
+      _Setting.enableOutgoingUtp: true,
+      _Setting.rateLimitIpOverhead: false,
+      _Setting.announceToAllTrackers: false,
+      _Setting.announceToAllTiers: true,
+    };
+    ints.forEach(s.setIntSetting);
+    bools.forEach(s.setBoolSetting);
+    s.setStringSetting(_Setting.userAgent, 'NoodleT/1.0.0');
+    s.setStringSetting(_Setting.peerFingerprint, '-NT1000-');
+    s.setStringSetting(
+      _Setting.dhtBootstrapNodes,
+      'dht.libtorrent.org:25401,dht.transmissionbt.com:6881,'
+      'router.bittorrent.com:6881,router.utorrent.com:6881,'
+      'dht.aelitis.com:6881',
+    );
+    s.setStringSetting(_Setting.listenInterfaces, '0.0.0.0:$port,[::]:$port');
+    s.setDownloadRateLimit(download > 0 ? download : 0);
+    s.setUploadRateLimit(upload > 0 ? upload : 0);
+  }
+
+  // ----------------------------------------------------------- torrents ----
+
+  void _checkNew(String id) {
+    if (_entries.containsKey(id)) {
+      throw const EngineException('duplicate', 'the torrent is already added');
+    }
+  }
+
+  _Entry _find(String id) =>
+      _entries[id] ??
+      (throw const EngineException('not_found', 'no such torrent'));
+
+  void _adopt(
+    String id,
+    lt.TorrentHandle handle, {
+    required String name,
+    required String savePath,
+    required String magnet,
+  }) {
+    final entry = _Entry(
+      id: id,
+      handle: handle,
+      name: name,
+      savePath: savePath,
+      magnet: magnet,
+      added: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+    _configure(entry);
+    _entries[id] = entry;
+    _saveIndex();
+    _saveResume(entry);
+  }
+
+  /// qBittorrent's per-torrent limits, and no automatic queueing: a torrent
+  /// runs exactly when the user has not paused it.
+  void _configure(_Entry entry) {
+    final handle = entry.handle;
+    handle.unsetFlags(lt.LibtorrentTorrentFlags.autoManaged);
+    handle.setMaxConnections(100);
+    handle.setMaxUploads(4);
+    entry.paused ? handle.pause() : handle.resume();
+  }
+
+  void _restore(lt.Session session) {
+    final List<dynamic> records;
+    try {
+      records = jsonDecode(_indexFile.readAsStringSync()) as List;
+    } on Object {
+      return; // first run
+    }
+    for (final record in records.cast<Map<String, dynamic>>()) {
+      final id = record['id'] as String;
+      final savePath = record['save_path'] as String;
+      final magnet = record['magnet'] as String? ?? '';
+      final handle =
+          _addFromResume(session, id, savePath) ??
+          _addFromMagnet(session, magnet, savePath);
+      if (handle == null) continue;
+      final entry = _Entry(
+        id: id,
+        handle: handle,
+        name: record['name'] as String? ?? '',
+        savePath: savePath,
+        magnet: magnet,
+        added: record['added'] as int? ?? 0,
+        paused: record['paused'] == true,
+        hasMetadata: record['has_metadata'] == true,
+      );
+      _configure(entry);
+      _entries[id] = entry;
+    }
+  }
+
+  lt.TorrentHandle? _addFromResume(
+    lt.Session session,
+    String id,
+    String savePath,
+  ) {
+    try {
+      final data = _resumeFile(id).readAsBytesSync();
+      if (data.isEmpty) return null;
+      return session.addTorrentFromTags([
+        lt.LibtorrentTagItem.bytesValue(lt.LibtorrentTag.torResumeData, data),
+        lt.LibtorrentTagItem.intValue(
+          lt.LibtorrentTag.torResumeDataSize,
+          data.length,
+        ),
+        lt.LibtorrentTagItem.stringValue(
+          lt.LibtorrentTag.torSavePath,
+          savePath,
+        ),
+      ]);
+    } on Object {
+      return null;
+    }
+  }
+
+  lt.TorrentHandle? _addFromMagnet(
+    lt.Session session,
+    String magnet,
+    String savePath,
+  ) {
+    if (magnet.isEmpty) return null;
+    try {
+      return session.addMagnet(magnetUri: magnet, savePath: savePath);
+    } on lt.LibtorrentException {
+      return null;
+    }
+  }
+
+  String _nameOf(lt.TorrentHandle handle) {
+    try {
+      return lt.parseMagnetUri(handle.makeMagnetUri()).name;
+    } on lt.LibtorrentException {
+      return '';
+    }
+  }
+
+  TorrentState _stateOf(lt.TorrentStatus status) {
+    if (status.error.isNotEmpty) return TorrentState.error;
+    if (status.paused) return TorrentState.paused;
+    return switch (status.state) {
+      lt.LibtorrentTorrentState.queuedForChecking ||
+      lt.LibtorrentTorrentState.checkingFiles ||
+      lt.LibtorrentTorrentState.checkingResumeData => TorrentState.checking,
+      lt.LibtorrentTorrentState.downloadingMetadata => TorrentState.metadata,
+      lt.LibtorrentTorrentState.finished ||
+      lt.LibtorrentTorrentState.seeding => TorrentState.seeding,
+      _ => TorrentState.downloading,
+    };
+  }
+
+  // -------------------------------------------------------------- files ----
+
+  bool _needsSave(lt.TorrentHandle handle) {
+    try {
+      return handle.needSaveResumeData();
+    } on lt.LibtorrentException {
+      return false;
+    }
+  }
+
+  void _saveResume(_Entry entry) {
+    try {
+      final data = entry.handle.getResumeData(flags: _saveInfoDict);
+      if (data.isNotEmpty) _write(_resumeFile(entry.id), data);
+    } on Object {
+      // The next autosave tries again.
+    }
+  }
+
+  void _saveIndex() {
+    final records = [
+      for (final entry in _entries.values)
+        {
+          'id': entry.id,
+          'name': entry.name,
+          'save_path': entry.savePath,
+          'magnet': entry.magnet,
+          'added': entry.added,
+          'paused': entry.paused,
+          'has_metadata': entry.hasMetadata,
+        },
+    ];
+    _write(_indexFile, utf8.encode(jsonEncode(records)));
+  }
+
+  /// Writes to a temporary file first so a crash never leaves half a file.
+  static void _write(File file, List<int> data) {
+    final tmp = File('${file.path}.tmp')..writeAsBytesSync(data, flush: true);
+    tmp.renameSync(file.path);
+  }
+
+  T _wrap<T>(String code, T Function() action) {
+    try {
+      return action();
+    } on lt.LibtorrentException catch (e) {
+      throw EngineException(code, e.message);
+    } on FileSystemException catch (e) {
+      throw EngineException(code, e.osError?.message ?? e.message);
+    }
+  }
+
+  /// torrent_handle::save_info_dict: keep the metadata inside resume data.
+  static const _saveInfoDict = 2;
+}
+
+class _Entry {
+  _Entry({
+    required this.id,
+    required this.handle,
+    required this.name,
+    required this.savePath,
+    required this.magnet,
+    required this.added,
+    this.paused = false,
+    this.hasMetadata = false,
+  });
+
+  final String id;
+  final lt.TorrentHandle handle;
+  String name;
+  final String savePath;
+
+  /// The link the torrent was added with: the way back if resume data is lost.
+  final String magnet;
+  final int added;
+  bool paused;
+  bool hasMetadata;
+  bool finished = false;
+}
+
+/// libtorrent 2.0 `settings_pack` identifiers that libtorrent_dart has no
+/// names for. Strings count from 0, integers from 0x4000, booleans from 0x8000.
+abstract final class _Setting {
+  static const userAgent = 0x0000;
+  static const listenInterfaces = 0x0005;
+  static const peerFingerprint = 0x000a;
+  static const dhtBootstrapNodes = 0x000b;
+
+  static const stopTrackerTimeout = 0x4002;
+  static const requestQueueTime = 0x4006;
+  static const connectionSpeed = 0x4012;
+  static const sendBufferLowWatermark = 0x401c;
+  static const sendBufferWatermark = 0x401d;
+  static const sendBufferWatermarkFactor = 0x401e;
+  static const chokingAlgorithm = 0x401f;
+  static const seedChokingAlgorithm = 0x4020;
+  static const activeDownloads = 0x4029;
+  static const activeSeeds = 0x402a;
+  static const activeDhtLimit = 0x402c;
+  static const activeTrackerLimit = 0x402d;
+  static const activeLsdLimit = 0x402e;
+  static const activeLimit = 0x402f;
+  static const unchokeSlotsLimit = 0x4053;
+  static const connectionsLimit = 0x4055;
+  static const mixedModeAlgorithm = 0x4060;
+  static const listenQueueSize = 0x4061;
+  static const checkingMemUsage = 0x4066;
+  static const aioThreads = 0x4068;
+  static const peerTurnover = 0x406f;
+  static const peerTurnoverCutoff = 0x4070;
+  static const peerTurnoverInterval = 0x4071;
+  static const alertMask = 0x4075;
+  static const outEncPolicy = 0x4076;
+  static const inEncPolicy = 0x4077;
+  static const allowedEncLevel = 0x4078;
+
+  static const rateLimitIpOverhead = 0x8010;
+  static const announceToAllTiers = 0x8011;
+  static const announceToAllTrackers = 0x8012;
+  static const enableOutgoingUtp = 0x8020;
+  static const enableIncomingUtp = 0x8021;
+  static const enableUpnp = 0x803b;
+  static const enableNatpmp = 0x803c;
+  static const enableLsd = 0x803d;
+  static const enableDht = 0x803e;
+}

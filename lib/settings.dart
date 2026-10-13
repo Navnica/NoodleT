@@ -1,0 +1,138 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'dart:ui';
+
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+
+/// The languages the interface can be switched to in the settings. The texts
+/// themselves are in `lib/l10n/app_<name>.arb`.
+enum AppLanguage {
+  /// Whatever the operating system is set to.
+  system,
+  ru,
+  en;
+
+  static AppLanguage parse(Object? name) =>
+      values.asNameMap()[name] ?? AppLanguage.system;
+
+  /// The locale to force, or null to follow the system.
+  Locale? get locale => this == system ? null : Locale(name);
+}
+
+class AppSettings {
+  const AppSettings({
+    required this.downloadDir,
+    required this.listenPort,
+    this.downloadLimitKb = 0,
+    this.uploadLimitKb = 0,
+    this.seedAfterDownload = true,
+    this.language = AppLanguage.system,
+  });
+
+  final String downloadDir;
+
+  /// Chosen at random on the first run and kept, so that port forwarding set
+  /// up by the router stays valid.
+  final int listenPort;
+
+  /// KiB per second, 0 means unlimited.
+  final int downloadLimitKb;
+  final int uploadLimitKb;
+
+  /// Whether a finished download keeps seeding until the user pauses it.
+  /// When false it is stopped as soon as it completes.
+  final bool seedAfterDownload;
+
+  final AppLanguage language;
+
+  AppSettings copyWith({
+    String? downloadDir,
+    int? downloadLimitKb,
+    int? uploadLimitKb,
+    bool? seedAfterDownload,
+    AppLanguage? language,
+  }) => AppSettings(
+    downloadDir: downloadDir ?? this.downloadDir,
+    listenPort: listenPort,
+    downloadLimitKb: downloadLimitKb ?? this.downloadLimitKb,
+    uploadLimitKb: uploadLimitKb ?? this.uploadLimitKb,
+    seedAfterDownload: seedAfterDownload ?? this.seedAfterDownload,
+    language: language ?? this.language,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'download_dir': downloadDir,
+    'listen_port': listenPort,
+    'download_limit_kb': downloadLimitKb,
+    'upload_limit_kb': uploadLimitKb,
+    'seed_after_download': seedAfterDownload,
+    'language': language.name,
+  };
+}
+
+/// Keeps the settings in settings.json inside the application data folder.
+class SettingsStore {
+  SettingsStore(this.dataDir);
+
+  /// Where NoodleT keeps its own files; the engine state lives here too.
+  final String dataDir;
+
+  File get _file => File(p.join(dataDir, 'settings.json'));
+
+  /// NOODLET_DATA_DIR moves the data elsewhere, e.g. for a portable copy or
+  /// for trying a build without touching the real downloads.
+  static Future<SettingsStore> open() async {
+    final custom = Platform.environment['NOODLET_DATA_DIR'] ?? '';
+    final dir = custom.isNotEmpty
+        ? Directory(custom)
+        : await getApplicationSupportDirectory();
+    await dir.create(recursive: true);
+    return SettingsStore(dir.path);
+  }
+
+  Future<AppSettings> load() async {
+    Map<String, dynamic> json = const {};
+    try {
+      json = jsonDecode(await _file.readAsString()) as Map<String, dynamic>;
+    } on Object {
+      // First run or a damaged file: fall back to the defaults.
+    }
+    final port = json['listen_port'];
+    final dir = json['download_dir'];
+    final settings = AppSettings(
+      downloadDir: dir is String && dir.isNotEmpty
+          ? dir
+          : await _defaultDownloadDir(),
+      listenPort: port is int && port > 1024 && port < 65536
+          ? port
+          : 49152 + Random().nextInt(16000),
+      downloadLimitKb: _limit(json['download_limit_kb']),
+      uploadLimitKb: _limit(json['upload_limit_kb']),
+      seedAfterDownload: json['seed_after_download'] != false,
+      language: AppLanguage.parse(json['language']),
+    );
+    if (json.isEmpty) await save(settings);
+    return settings;
+  }
+
+  Future<void> save(AppSettings settings) async {
+    final tmp = File('${_file.path}.tmp');
+    await tmp.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(settings.toJson()),
+      flush: true,
+    );
+    await tmp.rename(_file.path);
+  }
+
+  static int _limit(Object? value) => value is int && value > 0 ? value : 0;
+
+  static Future<String> _defaultDownloadDir() async {
+    final downloads = await getDownloadsDirectory();
+    if (downloads != null) return downloads.path;
+    final home =
+        Platform.environment['USERPROFILE'] ?? Platform.environment['HOME'];
+    return p.join(home ?? Directory.current.path, 'Downloads');
+  }
+}

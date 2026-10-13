@@ -1,0 +1,11 @@
+# The application icon. After changing assets/icon/icon.png run
+#   dart run flutter_launcher_icons
+# to regenerate the icon files of Windows and macOS. Linux has no generated
+# files: linux/CMakeLists.txt ships the same image as it is.
+flutter_launcher_icons:
+  image_path: "assets/icon/icon.png"
+  windows:
+    generate: true
+    icon_size: 256
+  macos:
+    generate: true

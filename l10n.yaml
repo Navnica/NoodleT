@@ -1,0 +1,8 @@
+# Translations: lib/l10n/app_<language>.arb, the English file is the template.
+# `flutter gen-l10n` (also run by every build) writes app_localizations*.dart
+# next to them.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

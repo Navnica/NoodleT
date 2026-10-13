@@ -1,0 +1,190 @@
+{
+  "@@locale": "en",
+  "inputHint": "Magnet link",
+  "openFile": ".torrent file",
+  "settings": "Settings",
+  "download": "Download",
+  "upload": "Upload",
+  "emptyTitle": "No downloads yet",
+  "emptyHint": "Paste a magnet link into the field below\nor drop a .torrent file into the window",
+  "dropHere": "Drop to add",
+  "add": "Add",
+  "cancel": "Cancel",
+  "save": "Save",
+  "downloadFolder": "Download folder",
+  "change": "Change",
+  "downloadLimit": "Download limit",
+  "uploadLimit": "Upload limit",
+  "limitHint": "∞",
+  "kbPerSecond": "KB/s",
+  "seedAfter": "Seed after downloading",
+  "seedAfterHint": "Until paused. When off, a torrent stops as soon as it is downloaded",
+  "language": "Language",
+  "languageSystem": "Auto",
+  "pause": "Pause",
+  "resume": "Resume",
+  "openFolder": "Show in folder",
+  "remove": "Remove",
+  "removeTitle": "Remove torrent?",
+  "removeFiles": "Also delete downloaded files",
+  "copy": "Copy",
+  "paused": "Paused",
+  "checking": "Checking",
+  "metadata": "Fetching metadata…",
+  "done": "Done",
+  "downloading": "Downloading",
+  "seeding": "Seeding",
+  "failed": "Error",
+  "size": "Size",
+  "downloaded": "Downloaded",
+  "uploaded": "Uploaded",
+  "ratio": "Ratio",
+  "timeLeft": "Time left",
+  "peersLabel": "Peers",
+  "seedsLabel": "Seeds",
+  "addedOn": "Added",
+  "folder": "Folder",
+  "hash": "Hash",
+  "amountOf": "{done} of {total}",
+  "@amountOf": {
+    "description": "Progress in bytes, e.g. \"1.2 GB of 3 GB\". Both values are already formatted sizes.",
+    "placeholders": {
+      "done": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "peersCount": "{count, plural, =1{1 peer} other{{count} peers}}",
+  "@peersCount": {
+    "description": "Number of connected peers.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sizeB": "{value} B",
+  "@sizeB": {
+    "description": "A size in bytes; value is an already formatted number.",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "sizeKb": "{value} KB",
+  "@sizeKb": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "sizeMb": "{value} MB",
+  "@sizeMb": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "sizeGb": "{value} GB",
+  "@sizeGb": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "sizeTb": "{value} TB",
+  "@sizeTb": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "rate": "{size}/s",
+  "@rate": {
+    "description": "A transfer speed; size is an already formatted size such as \"1.2 MB\".",
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "percent": "{value}%",
+  "@percent": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "durationDaysHours": "{days} d {hours} h",
+  "@durationDaysHours": {
+    "description": "Time left, the two largest units only.",
+    "placeholders": {
+      "days": {
+        "type": "int"
+      },
+      "hours": {
+        "type": "int"
+      }
+    }
+  },
+  "durationHoursMinutes": "{hours} h {minutes} min",
+  "@durationHoursMinutes": {
+    "placeholders": {
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "durationMinutes": "{minutes} min",
+  "@durationMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "durationSeconds": "{seconds} s",
+  "@durationSeconds": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "finished": "Download finished: {name}",
+  "@finished": {
+    "description": "Notice shown when a download completes.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "duplicate": "This torrent is already in the list",
+  "badMagnet": "The magnet link could not be parsed",
+  "badTorrent": "The file is not a valid .torrent",
+  "unreadable": "The file could not be read",
+  "notRecognised": "Neither a magnet link nor a .torrent file",
+  "addFailed": "The torrent could not be added: {reason}",
+  "@addFailed": {
+    "description": "reason is the error text of the engine or the operating system.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "engineFailed": "The torrent engine could not be started"
+}

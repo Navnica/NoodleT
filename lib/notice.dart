@@ -1,0 +1,25 @@
+/// Something the user should be told, shown as a snack bar. The controller
+/// only says what happened; the interface puts it into words in the current
+/// language.
+enum NoticeKind {
+  /// [Notice.detail] is the name of the torrent.
+  finished,
+  duplicate,
+  badMagnet,
+  badTorrent,
+  unreadable,
+  notRecognised,
+
+  /// [Notice.detail] is the reason given by the engine or the system.
+  addFailed,
+
+  /// [Notice.detail] is the whole text, as the engine words it.
+  engine,
+}
+
+class Notice {
+  const Notice(this.kind, [this.detail = '']);
+
+  final NoticeKind kind;
+  final String detail;
+}
