@@ -89,6 +89,9 @@ class TorrentEngine {
 
   static const _autosaveInterval = Duration(seconds: 30);
 
+  /// How often a running torrent without connections asks the DHT for peers.
+  static const _dhtRetryInterval = Duration(seconds: 15);
+
   File get _indexFile => File(p.join(_stateDir, 'torrents.json'));
   File get _sessionFile => File(p.join(_stateDir, 'session.dat'));
   File _resumeFile(String id) =>
@@ -191,6 +194,7 @@ class TorrentEngine {
           (autosave && _needsSave(entry.handle))) {
         _saveResume(entry);
       }
+      _retryDht(entry, status, now);
 
       result.add(
         Torrent(
@@ -455,6 +459,26 @@ class TorrentEngine {
     }
   }
 
+  /// libtorrent asks the DHT for peers of a new torrent only once, right when
+  /// it starts, and skips even that if the DHT is not up yet, which is always
+  /// the case for the torrents restored at startup. The next regular lookup
+  /// comes about 15 minutes later, and when the trackers give no peers the
+  /// torrent stands still all that time. So a torrent that runs without a
+  /// single connection asks again every [_dhtRetryInterval].
+  void _retryDht(_Entry entry, lt.TorrentStatus status, DateTime now) {
+    final waiting =
+        status.state == lt.LibtorrentTorrentState.downloading ||
+        status.state == lt.LibtorrentTorrentState.downloadingMetadata;
+    if (!waiting || status.paused || status.numConnections > 0) return;
+    if (now.difference(entry.lastDhtAnnounce) < _dhtRetryInterval) return;
+    entry.lastDhtAnnounce = now;
+    try {
+      entry.handle.forceDhtAnnounce();
+    } on lt.LibtorrentException {
+      // The next poll tries again.
+    }
+  }
+
   String _nameOf(lt.TorrentHandle handle) {
     try {
       return lt.parseMagnetUri(handle.makeMagnetUri()).name;
@@ -555,6 +579,11 @@ class _Entry {
   bool paused;
   bool hasMetadata;
   bool finished = false;
+
+  /// When the engine last asked the DHT for peers itself; see `_retryDht`.
+  /// Starts at the time the torrent is added, so the first retry comes one
+  /// interval later.
+  DateTime lastDhtAnnounce = DateTime.now();
 }
 
 /// libtorrent 2.0 `settings_pack` identifiers that libtorrent_dart has no
