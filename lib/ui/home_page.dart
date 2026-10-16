@@ -11,6 +11,7 @@ import '../app_controller.dart';
 import '../engine/engine.dart';
 import '../input.dart';
 import '../notice.dart';
+import '../tray.dart';
 import 'details_sheet.dart';
 import 'dialogs.dart';
 import 'format.dart';
@@ -40,6 +41,7 @@ class _HomePageState extends State<HomePage> {
 
   late final StreamSubscription<Notice> _notices;
   late final AppLifecycleListener _lifecycle;
+  final _tray = Tray();
   final _input = TextEditingController();
   bool _dragging = false;
 
@@ -66,10 +68,19 @@ class _HomePageState extends State<HomePage> {
         _controller.addText(input);
       }
     });
+    _controller.addListener(_syncTray);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The interface language may have changed.
+    _syncTray();
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_syncTray);
     _instance.setMethodCallHandler(null);
     _notices.cancel();
     _lifecycle.dispose();
@@ -99,6 +110,24 @@ class _HomePageState extends State<HomePage> {
           margin: const EdgeInsets.fromLTRB(16, 0, 16, _Dock.reserved - 12),
         ),
       );
+  }
+
+  /// Keeps the tray icon in line with the settings, the language and the
+  /// current speeds, which its tooltip shows.
+  void _syncTray() {
+    if (!mounted) return;
+    final s = AppLocalizations.of(context);
+    _tray.update(
+      enabled: _controller.settings.closeToTray,
+      open: s.trayOpen,
+      exit: s.trayExit,
+      hiddenTitle: s.trayHiddenTitle,
+      hiddenText: s.trayHiddenText,
+      tooltip:
+          'NoodleT\n'
+          '↓ ${formatRate(_controller.downloadRate, s)}   '
+          '↑ ${formatRate(_controller.uploadRate, s)}',
+    );
   }
 
   void _add(String text) {

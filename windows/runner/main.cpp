@@ -30,8 +30,9 @@ void ForwardArguments(HWND existing) {
 
 // Lets one NoodleT run at a time, since two would fight over the same
 // torrents. Returns false when another one is open; its window is brought to
-// the front and given this launch's arguments instead. An instance that is
-// still saving after its window was closed is waited for.
+// the front (out of the tray if need be) and given this launch's arguments
+// instead. An instance that is still saving after its window was closed is
+// waited for.
 bool AcquireSingleInstance() {
   // A separate data folder is a separate, independent copy.
   if (::GetEnvironmentVariableW(L"NOODLET_DATA_DIR", nullptr, 0) > 0) {
@@ -47,9 +48,15 @@ bool AcquireSingleInstance() {
       return true;
     }
     HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"NoodleT");
-    if (existing != nullptr && ::IsWindowVisible(existing)) {
+    // A hidden window is either in the tray, which counts as open, or saving
+    // before it quits, which is waited for.
+    const bool in_tray =
+        existing != nullptr && ::GetPropW(existing, kInTrayProperty) != nullptr;
+    if (existing != nullptr && (::IsWindowVisible(existing) || in_tray)) {
       if (::IsIconic(existing)) {
         ::ShowWindow(existing, SW_RESTORE);
+      } else if (in_tray) {
+        ::ShowWindow(existing, SW_SHOW);
       }
       ::SetForegroundWindow(existing);
       ForwardArguments(existing);

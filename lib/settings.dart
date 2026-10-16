@@ -28,6 +28,7 @@ class AppSettings {
     this.downloadLimitKb = 0,
     this.uploadLimitKb = 0,
     this.seedAfterDownload = true,
+    this.closeToTray = true,
     this.language = AppLanguage.system,
   });
 
@@ -45,6 +46,10 @@ class AppSettings {
   /// When false it is stopped as soon as it completes.
   final bool seedAfterDownload;
 
+  /// Whether closing the window hides it in the notification area while the
+  /// downloads go on. Only Windows has the tray icon.
+  final bool closeToTray;
+
   final AppLanguage language;
 
   AppSettings copyWith({
@@ -52,6 +57,7 @@ class AppSettings {
     int? downloadLimitKb,
     int? uploadLimitKb,
     bool? seedAfterDownload,
+    bool? closeToTray,
     AppLanguage? language,
   }) => AppSettings(
     downloadDir: downloadDir ?? this.downloadDir,
@@ -59,6 +65,7 @@ class AppSettings {
     downloadLimitKb: downloadLimitKb ?? this.downloadLimitKb,
     uploadLimitKb: uploadLimitKb ?? this.uploadLimitKb,
     seedAfterDownload: seedAfterDownload ?? this.seedAfterDownload,
+    closeToTray: closeToTray ?? this.closeToTray,
     language: language ?? this.language,
   );
 
@@ -68,6 +75,7 @@ class AppSettings {
     'download_limit_kb': downloadLimitKb,
     'upload_limit_kb': uploadLimitKb,
     'seed_after_download': seedAfterDownload,
+    'close_to_tray': closeToTray,
     'language': language.name,
   };
 }
@@ -111,6 +119,7 @@ class SettingsStore {
       downloadLimitKb: _limit(json['download_limit_kb']),
       uploadLimitKb: _limit(json['upload_limit_kb']),
       seedAfterDownload: json['seed_after_download'] != false,
+      closeToTray: json['close_to_tray'] != false,
       language: AppLanguage.parse(json['language']),
     );
     if (json.isEmpty) await save(settings);

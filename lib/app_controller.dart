@@ -143,6 +143,7 @@ class AppController extends ChangeNotifier {
       ),
     );
     await store.save(next);
+    notifyListeners();
   }
 
   /// Saves the state of every torrent. Blocks for a few seconds at most.

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -91,6 +93,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late final _down = _limitField(widget.controller.settings.downloadLimitKb);
   late final _up = _limitField(widget.controller.settings.uploadLimitKb);
   late bool _seed = widget.controller.settings.seedAfterDownload;
+  late bool _tray = widget.controller.settings.closeToTray;
   late AppLanguage _language = widget.controller.settings.language;
 
   static TextEditingController _limitField(int kb) =>
@@ -116,6 +119,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         downloadLimitKb: int.tryParse(_down.text) ?? 0,
         uploadLimitKb: int.tryParse(_up.text) ?? 0,
         seedAfterDownload: _seed,
+        closeToTray: _tray,
         language: _language,
       ),
     );
@@ -219,6 +223,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
                 contentPadding: EdgeInsets.zero,
               ),
+              // Only the Windows runner has the tray icon.
+              if (Platform.isWindows)
+                SwitchListTile(
+                  value: _tray,
+                  onChanged: (value) => setState(() => _tray = value),
+                  title: Text(s.closeToTray),
+                  subtitle: Text(
+                    s.closeToTrayHint,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                ),
             ],
           ),
         ),
