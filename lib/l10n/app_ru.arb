@@ -23,8 +23,6 @@
   "closeToTrayHint": "Загрузки продолжаются в фоне. Окно открывается значком в трее, выход — через его меню",
   "trayOpen": "Открыть NoodleT",
   "trayExit": "Выход",
-  "trayHiddenTitle": "NoodleT работает в фоне",
-  "trayHiddenText": "Загрузки продолжаются. Открыть окно можно значком в трее",
   "language": "Язык",
   "languageSystem": "Авто",
   "pause": "Пауза",

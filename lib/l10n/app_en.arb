@@ -23,8 +23,6 @@
   "closeToTrayHint": "Downloads go on in the background. The tray icon opens the window again; quit from its menu",
   "trayOpen": "Open NoodleT",
   "trayExit": "Exit",
-  "trayHiddenTitle": "NoodleT is still running",
-  "trayHiddenText": "Downloads go on. Click the tray icon to open the window",
   "language": "Language",
   "languageSystem": "Auto",
   "pause": "Pause",

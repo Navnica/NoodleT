@@ -23,12 +23,16 @@ class HomePage extends StatefulWidget {
     super.key,
     required this.controller,
     this.initialInputs = const [],
+    this.tray,
   });
 
   final AppController controller;
 
   /// Magnet links and .torrent paths from the command line.
   final List<String> initialInputs;
+
+  /// The notification area icon; null where there is none, e.g. in tests.
+  final Tray? tray;
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -41,7 +45,6 @@ class _HomePageState extends State<HomePage> {
 
   late final StreamSubscription<Notice> _notices;
   late final AppLifecycleListener _lifecycle;
-  final _tray = Tray();
   final _input = TextEditingController();
   bool _dragging = false;
 
@@ -117,12 +120,10 @@ class _HomePageState extends State<HomePage> {
   void _syncTray() {
     if (!mounted) return;
     final s = AppLocalizations.of(context);
-    _tray.update(
+    widget.tray?.update(
       enabled: _controller.settings.closeToTray,
       open: s.trayOpen,
       exit: s.trayExit,
-      hiddenTitle: s.trayHiddenTitle,
-      hiddenText: s.trayHiddenText,
       tooltip:
           'NoodleT\n'
           '↓ ${formatRate(_controller.downloadRate, s)}   '

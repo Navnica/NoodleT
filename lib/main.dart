@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'app_controller.dart';
 import 'engine/engine.dart';
 import 'settings.dart';
+import 'tray.dart';
 import 'ui/home_page.dart';
 import 'l10n/app_localizations.dart';
 import 'ui/theme.dart';
@@ -11,8 +13,10 @@ import 'ui/theme.dart';
 /// the operating system hands them over when NoodleT is their default app.
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
 
   AppController? controller;
+  Tray? tray;
   Object? failure;
   try {
     controller = AppController(
@@ -22,6 +26,10 @@ Future<void> main(List<String> args) async {
     await controller.start();
   } on Object catch (e) {
     failure = e;
+  }
+  if (failure == null) {
+    tray = Tray(onQuit: controller!.shutdown);
+    await tray.start();
   }
 
   runApp(
@@ -38,7 +46,11 @@ Future<void> main(List<String> args) async {
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
         home: failure == null
-            ? HomePage(controller: controller!, initialInputs: args)
+            ? HomePage(
+                controller: controller!,
+                initialInputs: args,
+                tray: tray,
+              )
             : _FailurePage(details: '$failure'),
       ),
     ),

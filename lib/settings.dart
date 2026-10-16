@@ -47,7 +47,7 @@ class AppSettings {
   final bool seedAfterDownload;
 
   /// Whether closing the window hides it in the notification area while the
-  /// downloads go on. Only Windows has the tray icon.
+  /// downloads go on.
   final bool closeToTray;
 
   final AppLanguage language;
@@ -119,7 +119,12 @@ class SettingsStore {
       downloadLimitKb: _limit(json['download_limit_kb']),
       uploadLimitKb: _limit(json['upload_limit_kb']),
       seedAfterDownload: json['seed_after_download'] != false,
-      closeToTray: json['close_to_tray'] != false,
+      closeToTray: switch (json['close_to_tray']) {
+        final bool value => value,
+        // Off by default on Linux: plain GNOME has no tray, and a window
+        // hidden there could not be brought back.
+        _ => !Platform.isLinux,
+      },
       language: AppLanguage.parse(json['language']),
     );
     if (json.isEmpty) await save(settings);
