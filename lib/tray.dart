@@ -6,7 +6,8 @@ import 'package:window_manager/window_manager.dart';
 
 /// The icon of NoodleT in the notification area (the system tray). While it
 /// is on, closing the window only hides it and the downloads go on: a click on
-/// the icon brings the window back and its menu quits.
+/// the icon brings the window back, and its menu lists what is downloading
+/// and quits.
 ///
 /// Closing always goes through here, tray or not: [start] takes it over from
 /// the system so that quitting can hide the window before the torrents are
@@ -25,9 +26,13 @@ class Tray with WindowListener {
   static const _image = 'assets/icon/tray.png';
 
   TrayIcon? _icon;
-  // Kept alive with their click listeners while the icon shows the menu.
-  Menu? _menu;
-  List<MenuItem> _items = const [];
+  // The menu and its items, kept alive with their click listeners. A rebuilt
+  // menu replaces them, and the old ones are freed on the next rebuild while
+  // no menu is open, since the user may still have the old one in front of
+  // them.
+  _TrayMenu? _menu;
+  final _retired = <_TrayMenu>[];
+  bool _menuOpen = false;
   (String, String)? _labels;
   String? _tooltip;
   bool _enabled = false;
@@ -43,14 +48,15 @@ class Tray with WindowListener {
     _removeIcon();
   }
 
-  /// Follows the setting, the language of the menu and the speeds shown in
-  /// the tooltip. Cheap to call on every refresh: only changes reach the
-  /// system.
+  /// Follows the setting, the language of the menu, the speeds shown in the
+  /// tooltip and the [downloads] listed at the top of the menu, one line
+  /// each. Cheap to call on every refresh: only changes reach the system.
   void update({
     required bool enabled,
     required String open,
     required String exit,
     required String tooltip,
+    List<String> downloads = const [],
   }) {
     _enabled = enabled;
     if (!enabled) {
@@ -59,9 +65,18 @@ class Tray with WindowListener {
     }
     final icon = _icon ??= _createIcon();
     if (icon == null) return;
-    if (_labels != (open, exit)) {
-      _labels = (open, exit);
-      _setMenu(icon, open, exit);
+    final menu = _menu;
+    if (menu == null ||
+        _labels != (open, exit) ||
+        menu.downloads.length != downloads.length) {
+      // An open menu keeps its rows until it closes; the next refresh after
+      // that rebuilds it.
+      if (menu == null || !_menuOpen) {
+        _labels = (open, exit);
+        _setMenu(icon, open, exit, downloads);
+      }
+    } else {
+      menu.relabel(downloads);
     }
     if (tooltip != _tooltip) {
       _tooltip = tooltip;
@@ -113,25 +128,47 @@ class Tray with WindowListener {
     return icon;
   }
 
-  void _setMenu(TrayIcon icon, String open, String exit) {
+  void _setMenu(
+    TrayIcon icon,
+    String open,
+    String exit,
+    List<String> downloads,
+  ) {
     final menu = Menu.create();
-    final openItem = MenuItem.createWithLabelAndType(open, MenuItemType.normal);
-    final exitItem = MenuItem.createWithLabelAndType(exit, MenuItemType.normal);
-    if (menu == null || openItem == null || exitItem == null) return;
-    openItem.addListener((event) {
-      if (event is MenuItemClickedEvent) show();
+    if (menu == null) return;
+    final items = <MenuItem>[];
+    MenuItem? addItem(String label, void Function() onClick) {
+      final item = MenuItem.createWithLabelAndType(label, MenuItemType.normal);
+      if (item == null) return null;
+      item.addListener((event) {
+        if (event is MenuItemClickedEvent) onClick();
+      });
+      menu.addItem(item);
+      items.add(item);
+      return item;
+    }
+
+    final rows = [
+      for (final line in downloads) ?addItem(line, show),
+    ];
+    if (rows.isNotEmpty) menu.addSeparator();
+    addItem(open, show);
+    menu.addSeparator();
+    addItem(exit, quit);
+    menu.addListener((event) {
+      if (event is MenuOpenedEvent) _menuOpen = true;
+      if (event is MenuClosedEvent) _menuOpen = false;
     });
-    exitItem.addListener((event) {
-      if (event is MenuItemClickedEvent) quit();
-    });
-    menu
-      ..addItem(openItem)
-      ..addSeparator()
-      ..addItem(exitItem);
     icon.setContextMenu(menu);
-    _disposeMenu();
-    _menu = menu;
-    _items = [openItem, exitItem];
+
+    if (!_menuOpen) {
+      for (final old in _retired) {
+        old.dispose();
+      }
+      _retired.clear();
+    }
+    if (_menu case final old?) _retired.add(old);
+    _menu = _TrayMenu(menu, items, rows, List.of(downloads));
   }
 
   void _removeIcon() {
@@ -139,23 +176,49 @@ class Tray with WindowListener {
       ?..setVisible(false)
       ..dispose();
     _icon = null;
-    _disposeMenu();
-    _labels = null;
-    _tooltip = null;
-  }
-
-  void _disposeMenu() {
-    for (final item in _items) {
-      item.dispose();
-    }
-    _items = const [];
     _menu?.dispose();
     _menu = null;
+    for (final old in _retired) {
+      old.dispose();
+    }
+    _retired.clear();
+    _menuOpen = false;
+    _labels = null;
+    _tooltip = null;
   }
 
   void _markInTray(bool inTray) {
     if (Platform.isWindows) {
       _instance.invokeMethod('setInTray', inTray).ignore();
     }
+  }
+}
+
+/// A tray menu with the rows of the current downloads on top.
+class _TrayMenu {
+  _TrayMenu(this.menu, this.items, this.rows, this.downloads);
+
+  final Menu menu;
+  final List<MenuItem> items;
+  final List<MenuItem> rows;
+
+  /// The text each of [rows] shows.
+  final List<String> downloads;
+
+  /// Updates the rows in place, which also works while the menu is open.
+  void relabel(List<String> next) {
+    for (var i = 0; i < rows.length; i++) {
+      if (downloads[i] != next[i]) {
+        downloads[i] = next[i];
+        rows[i].label = next[i];
+      }
+    }
+  }
+
+  void dispose() {
+    for (final item in items) {
+      item.dispose();
+    }
+    menu.dispose();
   }
 }

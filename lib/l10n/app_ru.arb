@@ -23,6 +23,7 @@
   "closeToTrayHint": "Загрузки продолжаются в фоне. Окно открывается значком в трее, выход — через его меню",
   "trayOpen": "Открыть NoodleT",
   "trayExit": "Выход",
+  "trayMore": "И ещё {count}",
   "language": "Язык",
   "languageSystem": "Авто",
   "pause": "Пауза",

@@ -23,6 +23,15 @@
   "closeToTrayHint": "Downloads go on in the background. The tray icon opens the window again; quit from its menu",
   "trayOpen": "Open NoodleT",
   "trayExit": "Exit",
+  "trayMore": "And {count} more",
+  "@trayMore": {
+    "description": "Last line of the downloads in the tray menu when not all of them fit.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "language": "Language",
   "languageSystem": "Auto",
   "pause": "Pause",

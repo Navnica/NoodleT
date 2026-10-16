@@ -120,16 +120,46 @@ class _HomePageState extends State<HomePage> {
   void _syncTray() {
     if (!mounted) return;
     final s = AppLocalizations.of(context);
+    final active = [
+      for (final torrent in _controller.torrents)
+        if (torrent.state
+            case TorrentState.downloading ||
+                TorrentState.checking ||
+                TorrentState.metadata)
+          torrent,
+    ];
     widget.tray?.update(
       enabled: _controller.settings.closeToTray,
       open: s.trayOpen,
       exit: s.trayExit,
+      downloads: [
+        for (final torrent in active.take(_trayRows))
+          '${_shorten(torrent.name)} — ${_trayStatus(torrent, s)}',
+        if (active.length > _trayRows) s.trayMore(active.length - _trayRows),
+      ],
       tooltip:
           'NoodleT\n'
           '↓ ${formatRate(_controller.downloadRate, s)}   '
           '↑ ${formatRate(_controller.uploadRate, s)}',
     );
   }
+
+  /// How many downloads the tray menu lists before "and N more".
+  static const _trayRows = 5;
+
+  /// Long names would stretch the tray menu across the screen.
+  static String _shorten(String name) =>
+      name.length <= 40 ? name : '${name.substring(0, 39)}…';
+
+  static String _trayStatus(Torrent torrent, AppLocalizations s) =>
+      switch (torrent.state) {
+        TorrentState.metadata => s.metadata,
+        TorrentState.checking =>
+          '${s.checking} ${formatPercent(torrent.progress, s)}',
+        _ =>
+          '${formatPercent(torrent.progress, s)} · '
+              '${formatRate(torrent.downloadRate, s)}',
+      };
 
   void _add(String text) {
     if (text.trim().isEmpty) return;
