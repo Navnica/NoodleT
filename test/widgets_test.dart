@@ -190,6 +190,64 @@ void main() {
     expect(calls, ['1 true', '0 false', '0,1,2 true']);
   });
 
+  testWidgets('file choice dialog returns the chosen files', (tester) async {
+    final files = [
+      for (final (i, name) in ['one.mkv', 'two.srt', 'three.nfo'].indexed)
+        TorrentFile(
+          index: i,
+          path: 'Album/$name',
+          size: (i + 1) * 1000,
+          done: 0,
+          wanted: true,
+        ),
+    ];
+    Set<int>? result = {-1};
+    await tester.pumpWidget(
+      _app(
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () async => result = await showFileChoiceDialog(
+              context,
+              name: 'Album',
+              files: files,
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    Future<void> open() async {
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    await open();
+    expect(find.text(_en.chooseFilesTitle), findsOne);
+    expect(find.text('one.mkv'), findsOne);
+    // Sizes only: nothing is downloaded yet.
+    expect(find.textContaining('%'), findsNothing);
+    final boxes = find.byType(Checkbox);
+    await tester.tap(boxes.at(2)); // two.srt
+    await tester.pump();
+    await tester.tap(find.text(_en.add));
+    await tester.pumpAndSettle();
+    expect(result, {0, 2});
+
+    await open();
+    await tester.tap(find.text(_en.cancel));
+    await tester.pumpAndSettle();
+    expect(result, isNull);
+
+    // With every file cleared there is nothing to add.
+    await open();
+    await tester.tap(find.byType(Checkbox).first); // all chosen: clears all
+    await tester.pump();
+    final add = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, _en.add),
+    );
+    expect(add.onPressed, isNull);
+  });
+
   testWidgets('remove dialog returns the checkbox value', (tester) async {
     bool? result;
     await tester.pumpWidget(

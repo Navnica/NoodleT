@@ -27,6 +27,8 @@
   "files": "Файлы",
   "filesChosen": "выбрано {chosen} из {total}",
   "selectAll": "Выбрать все",
+  "chooseFilesTitle": "Какие файлы скачать?",
+  "chosenSize": "Будет скачано {chosen} из {total}",
   "language": "Язык",
   "languageSystem": "Авто",
   "pause": "Пауза",

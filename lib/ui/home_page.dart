@@ -44,6 +44,9 @@ class _HomePageState extends State<HomePage> {
   static const _instance = MethodChannel('noodlet/instance');
 
   late final StreamSubscription<Notice> _notices;
+  late final StreamSubscription<FileChoice> _fileChoices;
+  // One file choice at a time, e.g. when several torrents are dropped at once.
+  Future<void> _choosing = Future.value();
   late final AppLifecycleListener _lifecycle;
   final _input = TextEditingController();
   bool _dragging = false;
@@ -54,6 +57,9 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _notices = _controller.notices.listen(_showNotice);
+    _fileChoices = _controller.fileChoices.listen((choice) {
+      _choosing = _choosing.then((_) => _chooseFiles(choice));
+    });
     _lifecycle = AppLifecycleListener(
       onExitRequested: () async {
         _controller.shutdown();
@@ -86,6 +92,7 @@ class _HomePageState extends State<HomePage> {
     _controller.removeListener(_syncTray);
     _instance.setMethodCallHandler(null);
     _notices.cancel();
+    _fileChoices.cancel();
     _lifecycle.dispose();
     _input.dispose();
     super.dispose();
@@ -113,6 +120,26 @@ class _HomePageState extends State<HomePage> {
           margin: const EdgeInsets.fromLTRB(16, 0, 16, _Dock.reserved - 12),
         ),
       );
+  }
+
+  /// Asks which files of a torrent just added to download; it waits paused
+  /// until then.
+  Future<void> _chooseFiles(FileChoice choice) async {
+    if (!mounted) return;
+    // The metadata of a magnet link may arrive while the window is in the
+    // tray.
+    await widget.tray?.show();
+    if (!mounted) return;
+    final chosen = await showFileChoiceDialog(
+      context,
+      name: choice.name,
+      files: choice.files,
+    );
+    if (chosen == null) {
+      _controller.cancelAdd(choice.id);
+    } else {
+      _controller.chooseFiles(choice.id, chosen);
+    }
   }
 
   /// Keeps the tray icon in line with the settings, the language and the

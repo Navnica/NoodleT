@@ -148,9 +148,7 @@ class Tray with WindowListener {
       return item;
     }
 
-    final rows = [
-      for (final line in downloads) ?addItem(line, show),
-    ];
+    final rows = [for (final line in downloads) ?addItem(line, show)];
     if (rows.isNotEmpty) menu.addSeparator();
     addItem(open, show);
     menu.addSeparator();

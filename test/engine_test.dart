@@ -74,7 +74,10 @@ void main() {
     start();
     // A torrent of three files, made here; the downloads go elsewhere.
     final sep = Platform.pathSeparator;
-    final source = Directory('${dir.path}$sep' 'Альбом')..createSync();
+    final source = Directory(
+      '${dir.path}$sep'
+      'Альбом',
+    )..createSync();
     final sizes = {'a.txt': 1000, 'b.txt': 20000, 'c.txt': 300};
     sizes.forEach((name, size) {
       File('${source.path}$sep$name').writeAsBytesSync(List.filled(size, 7));
@@ -82,8 +85,10 @@ void main() {
     final torrentFile = File('${dir.path}${sep}album.torrent')
       ..writeAsBytesSync(lt.createTorrentData(sourcePath: source.path));
     final downloads = Directory('${dir.path}${sep}downloads')..createSync();
-    engine.addFile(torrentFile.path, downloads.path);
-    final id = engine.poll().single.id;
+    // Paused, as while the user picks the files: nothing starts.
+    final id = engine.addFile(torrentFile.path, downloads.path, paused: true);
+    expect(engine.poll().single.id, id);
+    expect(engine.poll().single.state, TorrentState.paused);
 
     var files = engine.files(id);
     expect(files.map((f) => f.path), [
@@ -109,6 +114,12 @@ void main() {
     engine.setFilesWanted(id, [big], wanted: true);
     expect(engine.files(id).every((f) => f.wanted), isTrue);
     expect(engine.poll().single.size, 21300);
+
+    // Still paused after the restart, until the choice is made.
+    expect(engine.poll().single.state, TorrentState.paused);
+    engine.resume(id);
+    expect(engine.poll().single.state, isNot(TorrentState.paused));
+    expect(engine.takeFileChoices(), isEmpty); // only magnet links go there
   });
 
   test('reports bad input', () {

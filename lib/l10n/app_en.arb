@@ -37,6 +37,19 @@
     }
   },
   "selectAll": "Select all",
+  "chooseFilesTitle": "Which files to download?",
+  "chosenSize": "{chosen} of {total} will be downloaded",
+  "@chosenSize": {
+    "description": "Below the file list when adding a torrent; both are formatted sizes such as \"1.2 GB\".",
+    "placeholders": {
+      "chosen": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
   "trayMore": "And {count} more",
   "@trayMore": {
     "description": "Last line of the downloads in the tray menu when not all of them fit.",

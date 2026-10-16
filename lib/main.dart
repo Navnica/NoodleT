@@ -46,11 +46,7 @@ Future<void> main(List<String> args) async {
         theme: buildTheme(Brightness.light),
         darkTheme: buildTheme(Brightness.dark),
         home: failure == null
-            ? HomePage(
-                controller: controller!,
-                initialInputs: args,
-                tray: tray,
-              )
+            ? HomePage(controller: controller!, initialInputs: args, tray: tray)
             : _FailurePage(details: '$failure'),
       ),
     ),

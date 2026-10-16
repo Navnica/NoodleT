@@ -25,6 +25,11 @@ class AppController extends ChangeNotifier {
   Stream<Notice> get notices => _notices.stream;
   final _notices = StreamController<Notice>.broadcast();
 
+  /// Torrents of several files that wait paused for the user to pick the
+  /// files; answered with [chooseFiles] or [cancelAdd].
+  Stream<FileChoice> get fileChoices => _fileChoices.stream;
+  final _fileChoices = StreamController<FileChoice>.broadcast();
+
   Timer? _timer;
   bool _running = false;
   final _downloading = <String>{};
@@ -54,6 +59,13 @@ class AppController extends ChangeNotifier {
       next = engine.poll();
     } on EngineException {
       return;
+    }
+    for (final id in engine.takeFileChoices()) {
+      final name = next.where((t) => t.id == id).firstOrNull?.name;
+      final files = this.files(id);
+      if (files.length > 1) {
+        _fileChoices.add(FileChoice(id: id, name: name ?? id, files: files));
+      }
     }
     // Newest first; the id keeps the order stable within one second.
     next.sort((a, b) {
@@ -95,6 +107,9 @@ class AppController extends ChangeNotifier {
     add(input);
   }
 
+  /// A torrent of several files waits paused on [fileChoices] for the user
+  /// to pick them: a .torrent file right away, a magnet link once its
+  /// metadata arrives.
   void add(TorrentInput input) {
     try {
       Directory(settings.downloadDir).createSync(recursive: true);
@@ -102,7 +117,12 @@ class AppController extends ChangeNotifier {
         case MagnetInput(:final uri):
           engine.addMagnet(uri, settings.downloadDir);
         case FileInput(:final path):
-          engine.addFile(path, settings.downloadDir);
+          final id = engine.addFile(path, settings.downloadDir, paused: true);
+          if (engine.files(id).length > 1) {
+            _askFiles(id);
+          } else {
+            engine.resume(id);
+          }
       }
       refresh();
     } on EngineException catch (e) {
@@ -146,10 +166,38 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Starts the torrent [id] that waited on [fileChoices], with only the
+  /// files [wanted].
+  void chooseFiles(String id, Set<int> wanted) {
+    _guard(() {
+      final skipped = [
+        for (final file in engine.files(id))
+          if (!wanted.contains(file.index)) file.index,
+      ];
+      if (skipped.isNotEmpty) {
+        engine.setFilesWanted(id, skipped, wanted: false);
+      }
+      engine.resume(id);
+    });
+    refresh();
+  }
+
+  /// Drops the torrent [id] that waited on [fileChoices]: the user changed
+  /// their mind about adding it.
+  void cancelAdd(String id) {
+    _guard(() => engine.remove(id, deleteFiles: true));
+    refresh();
+  }
+
+  void _askFiles(String id) {
+    final name = engine.poll().where((t) => t.id == id).firstOrNull?.name;
+    _fileChoices.add(FileChoice(id: id, name: name ?? id, files: files(id)));
+  }
+
   /// The files of [torrent]; empty until a magnet link has its metadata.
-  List<TorrentFile> files(Torrent torrent) {
+  List<TorrentFile> files(String id) {
     try {
-      return engine.files(torrent.id);
+      return engine.files(id);
     } on EngineException {
       return const [];
     }
@@ -193,7 +241,18 @@ class AppController extends ChangeNotifier {
   void dispose() {
     shutdown();
     _notices.close();
+    _fileChoices.close();
     language.dispose();
     super.dispose();
   }
+}
+
+/// A torrent that was just added paused and waits for the user to pick which
+/// of its [files] to download.
+class FileChoice {
+  const FileChoice({required this.id, required this.name, required this.files});
+
+  final String id;
+  final String name;
+  final List<TorrentFile> files;
 }

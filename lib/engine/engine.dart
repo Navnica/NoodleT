@@ -110,6 +110,7 @@ class TorrentEngine {
   lt.Session? _session;
   late String _stateDir;
   final _entries = <String, _Entry>{};
+  final _fileChoices = <String>[];
   DateTime _lastAutosave = DateTime.now();
 
   static const _autosaveInterval = Duration(seconds: 30);
@@ -142,7 +143,10 @@ class TorrentEngine {
     return lt.getLibtorrentVersion();
   });
 
-  void addMagnet(String uri, String savePath) {
+  /// Adds a magnet link and returns the id of the torrent. Once its metadata
+  /// arrives and shows more than one file, the torrent is paused and its id
+  /// comes out of [takeFileChoices], so that the user can pick the files.
+  String addMagnet(String uri, String savePath) {
     final session = _running;
     final lt.MagnetUriInfo info;
     try {
@@ -156,10 +160,14 @@ class TorrentEngine {
     _wrap('add_failed', () {
       final handle = session.addMagnet(magnetUri: uri, savePath: savePath);
       _adopt(id, handle, name: info.name, savePath: savePath, magnet: uri);
+      _entries[id]!.askFiles = true;
     });
+    return id;
   }
 
-  void addFile(String torrentPath, String savePath) {
+  /// Adds a .torrent file and returns the id of the torrent. A [paused] one
+  /// downloads nothing until [resume], e.g. while the user picks its files.
+  String addFile(String torrentPath, String savePath, {bool paused = false}) {
     final session = _running;
     final Uint8List data;
     try {
@@ -176,12 +184,38 @@ class TorrentEngine {
     final id = info.infohashHex.toLowerCase();
     _checkNew(id);
     _wrap('add_failed', () {
-      final handle = session.addTorrentData(
-        torrentData: data,
+      final handle = session.addTorrentFromTags([
+        lt.LibtorrentTagItem.bytesValue(lt.LibtorrentTag.torTorrent, data),
+        lt.LibtorrentTagItem.intValue(
+          lt.LibtorrentTag.torTorrentSize,
+          data.length,
+        ),
+        lt.LibtorrentTagItem.stringValue(
+          lt.LibtorrentTag.torSavePath,
+          savePath,
+        ),
+        // Paused from the start, so that not a single byte comes first.
+        if (paused)
+          lt.LibtorrentTagItem.intValue(lt.LibtorrentTag.torPaused, 1),
+      ]);
+      _adopt(
+        id,
+        handle,
+        name: info.name,
         savePath: savePath,
+        magnet: '',
+        paused: paused,
       );
-      _adopt(id, handle, name: info.name, savePath: savePath, magnet: '');
     });
+    return id;
+  }
+
+  /// Magnet links whose metadata has just shown several files; each is paused
+  /// until the user picks the files. Empties the list.
+  List<String> takeFileChoices() {
+    final ids = List.of(_fileChoices);
+    _fileChoices.clear();
+    return ids;
   }
 
   /// The state of every torrent. Also writes resume data when it is due.
@@ -211,6 +245,13 @@ class TorrentEngine {
         final name = _nameOf(entry.handle);
         if (name.isNotEmpty) entry.name = name;
         indexChanged = true;
+        if (entry.askFiles) {
+          entry.askFiles = false;
+          if (files(entry.id).length > 1) {
+            _pauseEntry(entry);
+            _fileChoices.add(entry.id);
+          }
+        }
       }
       final justFinished = finished && !entry.finished;
       entry.finished = finished;
@@ -244,14 +285,15 @@ class TorrentEngine {
     return result;
   }
 
-  void pause(String id) => _wrap('failed', () {
-    final entry = _find(id);
+  void pause(String id) => _wrap('failed', () => _pauseEntry(_find(id)));
+
+  void _pauseEntry(_Entry entry) {
     entry.handle.unsetFlags(lt.LibtorrentTorrentFlags.autoManaged);
     entry.handle.pause();
     entry.paused = true;
     _saveIndex();
     _saveResume(entry);
-  });
+  }
 
   void resume(String id) => _wrap('failed', () {
     final entry = _find(id);
@@ -435,6 +477,7 @@ class TorrentEngine {
     required String name,
     required String savePath,
     required String magnet,
+    bool paused = false,
   }) {
     final entry = _Entry(
       id: id,
@@ -443,6 +486,7 @@ class TorrentEngine {
       savePath: savePath,
       magnet: magnet,
       added: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      paused: paused,
     );
     _configure(entry);
     _entries[id] = entry;
@@ -658,6 +702,10 @@ class _Entry {
   bool paused;
   bool hasMetadata;
   bool finished = false;
+
+  /// A magnet link added in this run: its files are to be offered once its
+  /// metadata is known.
+  bool askFiles = false;
 
   /// When the engine last asked the DHT for peers itself; see `_retryDht`.
   /// Starts at the time the torrent is added, so the first retry comes one
