@@ -63,6 +63,31 @@ class Torrent {
   }
 }
 
+/// One file inside a torrent.
+class TorrentFile {
+  const TorrentFile({
+    required this.index,
+    required this.path,
+    required this.size,
+    required this.done,
+    required this.wanted,
+  });
+
+  /// The index libtorrent knows the file by.
+  final int index;
+
+  /// Relative to the save folder, with '/' between the parts; a torrent of
+  /// several files puts them all under its own folder.
+  final String path;
+  final int size;
+  final int done;
+
+  /// False when the user chose to skip the file.
+  final bool wanted;
+
+  double get progress => size > 0 ? (done / size).clamp(0, 1).toDouble() : 1;
+}
+
 class EngineException implements Exception {
   const EngineException(this.code, this.message);
 
@@ -235,6 +260,49 @@ class TorrentEngine {
     entry.handle.resume();
     entry.paused = false;
     _saveIndex();
+  });
+
+  /// The files of torrent [id], in the order of the torrent. Empty while a
+  /// magnet link is still waiting for its metadata.
+  List<TorrentFile> files(String id) => _wrap('failed', () {
+    final handle = _find(id).handle;
+    final entries = handle.getFiles();
+    if (entries.isEmpty) return const <TorrentFile>[];
+    final progress = handle.getFileProgress(flags: _pieceGranularity);
+    final priorities = handle.getFilePriorities();
+    return [
+      for (final file in entries)
+        // Padding between files to align them with pieces; never on disk.
+        if (file.flags & _padFile == 0)
+          TorrentFile(
+            index: file.index,
+            path: file.path.replaceAll(r'\', '/'),
+            size: file.size,
+            done: file.index < progress.length ? progress[file.index] : 0,
+            wanted:
+                file.index >= priorities.length || priorities[file.index] > 0,
+          ),
+    ];
+  });
+
+  /// Skips the files [indexes] of torrent [id] or takes them back. A skipped
+  /// file is not downloaded, and the torrent counts as finished once the
+  /// wanted ones are.
+  void setFilesWanted(
+    String id,
+    Iterable<int> indexes, {
+    required bool wanted,
+  }) => _wrap('failed', () {
+    final entry = _find(id);
+    final priorities = entry.handle.getFilePriorities();
+    for (final index in indexes) {
+      if (index >= 0 && index < priorities.length) {
+        priorities[index] = wanted ? _defaultPriority : _skipPriority;
+      }
+    }
+    entry.handle.prioritizeFiles(priorities);
+    // The choice lives in the resume data.
+    _saveResume(entry);
   });
 
   void remove(String id, {required bool deleteFiles}) => _wrap('failed', () {
@@ -554,6 +622,17 @@ class TorrentEngine {
 
   /// torrent_handle::save_info_dict: keep the metadata inside resume data.
   static const _saveInfoDict = 2;
+
+  /// torrent_handle::piece_granularity: file progress in whole pieces, much
+  /// cheaper than to the byte.
+  static const _pieceGranularity = 1;
+
+  /// file_storage::flag_pad_file.
+  static const _padFile = 1;
+
+  /// libtorrent's dont_download and default_priority.
+  static const _skipPriority = 0;
+  static const _defaultPriority = 4;
 }
 
 class _Entry {

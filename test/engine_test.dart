@@ -5,6 +5,7 @@ library;
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:libtorrent_dart/libtorrent_dart.dart' as lt;
 import 'package:noodlet/engine/engine.dart';
 
 const _hash = '0123456789abcdef0123456789abcdef01234567';
@@ -67,6 +68,47 @@ void main() {
     engine.shutdown();
     start();
     expect(engine.poll(), isEmpty);
+  });
+
+  test('lists the files of a torrent and keeps the ones skipped', () {
+    start();
+    // A torrent of three files, made here; the downloads go elsewhere.
+    final sep = Platform.pathSeparator;
+    final source = Directory('${dir.path}$sep' 'Альбом')..createSync();
+    final sizes = {'a.txt': 1000, 'b.txt': 20000, 'c.txt': 300};
+    sizes.forEach((name, size) {
+      File('${source.path}$sep$name').writeAsBytesSync(List.filled(size, 7));
+    });
+    final torrentFile = File('${dir.path}${sep}album.torrent')
+      ..writeAsBytesSync(lt.createTorrentData(sourcePath: source.path));
+    final downloads = Directory('${dir.path}${sep}downloads')..createSync();
+    engine.addFile(torrentFile.path, downloads.path);
+    final id = engine.poll().single.id;
+
+    var files = engine.files(id);
+    expect(files.map((f) => f.path), [
+      'Альбом/a.txt',
+      'Альбом/b.txt',
+      'Альбом/c.txt',
+    ]);
+    expect(files.map((f) => f.size), [1000, 20000, 300]);
+    expect(files.every((f) => f.wanted), isTrue);
+    expect(engine.poll().single.size, 21300);
+
+    final big = files.firstWhere((f) => f.path.endsWith('b.txt')).index;
+    engine.setFilesWanted(id, [big], wanted: false);
+    files = engine.files(id);
+    expect(files.where((f) => !f.wanted).single.index, big);
+    expect(engine.poll().single.size, 1300);
+
+    // The choice survives a restart.
+    engine.shutdown();
+    start();
+    expect(engine.files(id).where((f) => !f.wanted).single.index, big);
+
+    engine.setFilesWanted(id, [big], wanted: true);
+    expect(engine.files(id).every((f) => f.wanted), isTrue);
+    expect(engine.poll().single.size, 21300);
   });
 
   test('reports bad input', () {

@@ -147,6 +147,49 @@ void main() {
     }
   });
 
+  testWidgets('details list the files and switch them on and off', (
+    tester,
+  ) async {
+    addTearDown(tester.view.reset);
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(360, 1400);
+    final files = [
+      for (final (i, name) in ['one.mkv', 'two.srt', 'three.nfo'].indexed)
+        TorrentFile(
+          index: i,
+          path: 'Album/${'very long folder name/' * 3}$name',
+          size: (i + 1) * 1000000,
+          done: 0,
+          wanted: i != 1,
+        ),
+    ];
+    final calls = <String>[];
+    await tester.pumpWidget(
+      _app(
+        TorrentDetails(
+          torrent: _torrent(TorrentState.downloading),
+          files: files,
+          onToggle: () {},
+          onOpenFolder: () {},
+          onRemove: () {},
+          onFilesWanted: (indexes, wanted) =>
+              calls.add('${indexes.join(',')} $wanted'),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.text('${_en.files}  ·  ${_en.filesChosen(2, 3)}'), findsOne);
+    // The torrent's own folder is not repeated in every line.
+    expect(find.textContaining('Album/'), findsNothing);
+
+    final boxes = find.byType(Checkbox);
+    expect(boxes, findsNWidgets(4)); // "all" and one per file
+    await tester.tap(boxes.at(2)); // the skipped two.srt
+    await tester.tap(boxes.at(1)); // one.mkv
+    await tester.tap(boxes.first); // partly chosen: all of them
+    expect(calls, ['1 true', '0 false', '0,1,2 true']);
+  });
+
   testWidgets('remove dialog returns the checkbox value', (tester) async {
     bool? result;
     await tester.pumpWidget(

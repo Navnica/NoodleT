@@ -146,6 +146,25 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The files of [torrent]; empty until a magnet link has its metadata.
+  List<TorrentFile> files(Torrent torrent) {
+    try {
+      return engine.files(torrent.id);
+    } on EngineException {
+      return const [];
+    }
+  }
+
+  /// Skips the files [indexes] of [torrent], or takes them back.
+  void setFilesWanted(
+    Torrent torrent,
+    Iterable<int> indexes, {
+    required bool wanted,
+  }) {
+    _guard(() => engine.setFilesWanted(torrent.id, indexes, wanted: wanted));
+    refresh();
+  }
+
   /// Saves the state of every torrent. Blocks for a few seconds at most.
   void shutdown() {
     if (!_running) return;

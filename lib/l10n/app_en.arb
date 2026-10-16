@@ -23,6 +23,20 @@
   "closeToTrayHint": "Downloads go on in the background. The tray icon opens the window again; quit from its menu",
   "trayOpen": "Open NoodleT",
   "trayExit": "Exit",
+  "files": "Files",
+  "filesChosen": "{chosen} of {total} chosen",
+  "@filesChosen": {
+    "description": "How many files of a torrent are downloaded, out of all of them.",
+    "placeholders": {
+      "chosen": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "selectAll": "Select all",
   "trayMore": "And {count} more",
   "@trayMore": {
     "description": "Last line of the downloads in the tray menu when not all of them fit.",
