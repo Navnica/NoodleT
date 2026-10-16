@@ -7,10 +7,31 @@
 
 namespace {
 
+// Hands the command line of this launch (.torrent paths and magnet links, e.g.
+// a file opened from Explorer) to the NoodleT that is already open, which adds
+// them as if they had been dropped onto its window.
+void ForwardArguments(HWND existing) {
+  std::string payload;
+  for (const std::string& argument : GetCommandLineArguments()) {
+    payload += argument;
+    payload.push_back('\0');
+  }
+  if (payload.empty()) {
+    return;
+  }
+  COPYDATASTRUCT data{};
+  data.dwData = kForwardedArgumentsMessage;
+  data.cbData = static_cast<DWORD>(payload.size());
+  data.lpData = payload.data();
+  ::SendMessageTimeoutW(existing, WM_COPYDATA, 0,
+                        reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG,
+                        5000, nullptr);
+}
+
 // Lets one NoodleT run at a time, since two would fight over the same
 // torrents. Returns false when another one is open; its window is brought to
-// the front instead. An instance that is still saving after its window was
-// closed is waited for.
+// the front and given this launch's arguments instead. An instance that is
+// still saving after its window was closed is waited for.
 bool AcquireSingleInstance() {
   // A separate data folder is a separate, independent copy.
   if (::GetEnvironmentVariableW(L"NOODLET_DATA_DIR", nullptr, 0) > 0) {
@@ -31,6 +52,7 @@ bool AcquireSingleInstance() {
         ::ShowWindow(existing, SW_RESTORE);
       }
       ::SetForegroundWindow(existing);
+      ForwardArguments(existing);
       return false;
     }
   }

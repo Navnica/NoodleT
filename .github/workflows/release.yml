@@ -1,6 +1,6 @@
 # Builds the Windows installer on every push to the build branch and publishes
-# it as a GitHub release. The release and its tag are named after the short
-# hash of the pushed commit, e.g. 7fa625d:
+# it as a GitHub release. The version comes from pubspec.yaml: bump it before
+# releasing, since a version that already has a release fails the build.
 #   git switch build
 #   git merge main
 #   git push
@@ -18,6 +18,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The tags, to tell whether this version is out already.
+          fetch-depth: 0
+
+      - name: Read the version from pubspec.yaml
+        id: version
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version:' pubspec.yaml | sed 's/^version: *//; s/+.*//')
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::v$version is already released, bump the version in pubspec.yaml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: subosito/flutter-action@v2
         with:
@@ -25,13 +39,6 @@ jobs:
           flutter-version: 3.47.7
           cache: true
 
-      - name: Name the build after the commit
-        id: version
-        shell: bash
-        run: echo "version=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
-      # The version inside noodlet.exe stays the one in pubspec.yaml: Windows
-      # only accepts numbers there, not a commit hash.
       - name: Build the app
         run: flutter build windows --release
 
@@ -47,8 +54,8 @@ jobs:
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: ${{ steps.version.outputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
+          name: NoodleT ${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
           files: dist/NoodleT-Setup-*.exe
           generate_release_notes: true

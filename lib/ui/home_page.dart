@@ -34,6 +34,10 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  /// Magnet links and .torrent paths of later launches, which the Windows
+  /// runner hands over to this window instead of opening a second one.
+  static const _instance = MethodChannel('noodlet/instance');
+
   late final StreamSubscription<Notice> _notices;
   late final AppLifecycleListener _lifecycle;
   final _input = TextEditingController();
@@ -56,10 +60,17 @@ class _HomePageState extends State<HomePage> {
         _controller.addText(input);
       }
     });
+    _instance.setMethodCallHandler((call) async {
+      if (call.method != 'open') return;
+      for (final input in (call.arguments as List).cast<String>()) {
+        _controller.addText(input);
+      }
+    });
   }
 
   @override
   void dispose() {
+    _instance.setMethodCallHandler(null);
     _notices.cancel();
     _lifecycle.dispose();
     _input.dispose();

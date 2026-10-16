@@ -2,10 +2,10 @@
 ;
 ; Build the app first (flutter build windows --release), then compile this
 ; script with Inno Setup 6:
-;   ISCC.exe /DAppVersion=7fa625d installer\noodlet.iss
+;   ISCC.exe /DAppVersion=1.2.3 installer\noodlet.iss
 ; The installer lands in dist\. The release workflow in .github/workflows does
-; both steps for every push to the build branch, naming the build after the
-; short hash of the commit.
+; both steps for every push to the build branch, with the version from
+; pubspec.yaml.
 
 #define AppName "NoodleT"
 #define AppExe "noodlet.exe"
