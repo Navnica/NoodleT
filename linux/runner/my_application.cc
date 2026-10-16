@@ -14,6 +14,16 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+// Hides the window as soon as the user closes it. The handler of the Flutter
+// view runs next and lets Dart save the torrents, which waits for the trackers
+// to hear the "stopped" announce (stop_tracker_timeout); without this the
+// window would hang on screen for those seconds.
+static gboolean delete_event_cb(GtkWidget* window, GdkEvent* event,
+                                gpointer user_data) {
+  gtk_widget_hide(window);
+  return FALSE;
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
@@ -53,6 +63,11 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 480, 780);
+
+  // Connected before the view is realized, so it runs before the view's own
+  // handler of the same signal.
+  g_signal_connect(window, "delete-event", G_CALLBACK(delete_event_cb),
+                   nullptr);
 
   // The icon is installed next to the Flutter assets, see ../CMakeLists.txt.
   g_autofree gchar* exe_path = g_file_read_link("/proc/self/exe", nullptr);
