@@ -5,6 +5,8 @@
 .pub/
 /build/
 /coverage/
+# Installers compiled from installer/noodlet.iss
+/dist/
 **/doc/api/
 migrate_working_dir/
 
