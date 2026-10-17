@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../engine/engine.dart';
+import 'dialogs.dart';
 import 'file_list.dart';
 import 'format.dart';
 import '../l10n/app_localizations.dart';
@@ -61,6 +62,15 @@ class _DetailsSheet extends StatelessWidget {
         onRemove: () => onRemove(torrent),
         onFilesWanted: (indexes, wanted) =>
             controller.setFilesWanted(torrent, indexes, wanted: wanted),
+        onSequential: (sequential) =>
+            controller.setSequential(torrent, sequential: sequential),
+        onMove: () async {
+          final folder = await pickFolder(torrent.savePath);
+          if (folder != null) controller.move(torrent, folder);
+        },
+        trackers: () => controller.trackers(torrent),
+        onAddTrackers: (text) => controller.addTrackers(torrent, text),
+        peers: () => controller.peers(torrent),
       );
     },
   );
@@ -76,6 +86,11 @@ class TorrentDetails extends StatelessWidget {
     required this.onRemove,
     this.files = const [],
     this.onFilesWanted,
+    this.onSequential,
+    this.onMove,
+    this.trackers,
+    this.onAddTrackers,
+    this.peers,
   });
 
   final Torrent torrent;
@@ -86,6 +101,20 @@ class TorrentDetails extends StatelessWidget {
   /// Listed with a checkbox each when there are several.
   final List<TorrentFile> files;
   final void Function(Iterable<int> indexes, bool wanted)? onFilesWanted;
+
+  /// Switches the download in order; the switch is hidden without it.
+  final ValueChanged<bool>? onSequential;
+
+  /// Moves the files elsewhere; no button without it.
+  final VoidCallback? onMove;
+
+  /// Read only while their section is open, since they cost a call into
+  /// the engine each.
+  final List<String> Function()? trackers;
+  final List<Peer> Function()? peers;
+
+  /// Adds the trackers in the text, one per line.
+  final ValueChanged<String>? onAddTrackers;
 
   @override
   Widget build(BuildContext context) {
@@ -165,6 +194,32 @@ class TorrentDetails extends StatelessWidget {
             const SizedBox(height: 22),
             FileList(files: files, onWanted: onFilesWanted),
           ],
+          if (onSequential case final onChanged?) ...[
+            const SizedBox(height: 12),
+            SwitchListTile(
+              value: t.sequential,
+              onChanged: onChanged,
+              title: Text(s.sequential),
+              subtitle: Text(
+                s.sequentialHint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              contentPadding: EdgeInsets.zero,
+            ),
+          ],
+          if (trackers case final read?)
+            _Section(
+              title: s.trackers,
+              builder: (context) =>
+                  _Trackers(trackers: read(), onAdd: onAddTrackers),
+            ),
+          if (peers case final read?)
+            _Section(
+              title: '${s.peersLabel} (${t.peers})',
+              builder: (context) => _Peers(peers: read()),
+            ),
           const SizedBox(height: 22),
           _Line(
             label: s.folder,
@@ -172,6 +227,9 @@ class TorrentDetails extends StatelessWidget {
             icon: Icons.folder_open_rounded,
             tooltip: s.openFolder,
             onPressed: onOpenFolder,
+            secondIcon: onMove == null ? null : Icons.drive_file_move_outline,
+            secondTooltip: s.move,
+            onSecondPressed: onMove,
           ),
           const SizedBox(height: 14),
           _Line(
@@ -261,7 +319,194 @@ class _Fact extends StatelessWidget {
   }
 }
 
-/// A long value on its own line with one action next to it.
+/// A section that opens on a click and builds its content only while open.
+class _Section extends StatefulWidget {
+  const _Section({required this.title, required this.builder});
+
+  final String title;
+  final WidgetBuilder builder;
+
+  @override
+  State<_Section> createState() => _SectionState();
+}
+
+class _SectionState extends State<_Section> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(widget.title, style: theme.textTheme.titleSmall),
+                ),
+                Icon(
+                  _open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_open) widget.builder(context),
+      ],
+    );
+  }
+}
+
+class _Trackers extends StatefulWidget {
+  const _Trackers({required this.trackers, this.onAdd});
+
+  final List<String> trackers;
+  final ValueChanged<String>? onAdd;
+
+  @override
+  State<_Trackers> createState() => _TrackersState();
+}
+
+class _TrackersState extends State<_Trackers> {
+  final _field = TextEditingController();
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  void _add() {
+    if (_field.text.trim().isEmpty) return;
+    widget.onAdd?.call(_field.text);
+    _field.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.trackers.isEmpty)
+          Text(s.noTrackers, style: muted)
+        else
+          for (final url in widget.trackers)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: SelectableText(
+                url,
+                maxLines: 1,
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+        if (widget.onAdd != null) ...[
+          const SizedBox(height: 10),
+          TextField(
+            controller: _field,
+            minLines: 1,
+            maxLines: 4,
+            style: theme.textTheme.bodySmall,
+            decoration: InputDecoration(
+              hintText: s.trackersHint,
+              suffixIcon: IconButton(
+                tooltip: s.addTrackers,
+                onPressed: _add,
+                icon: const Icon(Icons.add_rounded, size: 20),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+class _Peers extends StatelessWidget {
+  const _Peers({required this.peers});
+
+  final List<Peer> peers;
+
+  /// More would only make the panel long; the fastest come first.
+  static const _shown = 30;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final figures = theme.textTheme.bodySmall?.copyWith(
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    if (peers.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Text(s.noPeers, style: muted),
+      );
+    }
+    return Column(
+      children: [
+        for (final peer in peers.take(_shown))
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 3),
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: Text(
+                    peer.address,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: figures,
+                  ),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: Text(
+                    peer.client,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: muted,
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: Text(
+                    '↓ ${formatRate(peer.downloadRate, s)}  '
+                    '↑ ${formatRate(peer.uploadRate, s)}',
+                    textAlign: TextAlign.end,
+                    maxLines: 1,
+                    style: figures,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        if (peers.length > _shown)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(s.trayMore(peers.length - _shown), style: muted),
+          ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+/// A long value on its own line with an action or two next to it.
 class _Line extends StatelessWidget {
   const _Line({
     required this.label,
@@ -269,6 +514,9 @@ class _Line extends StatelessWidget {
     required this.icon,
     required this.tooltip,
     required this.onPressed,
+    this.secondIcon,
+    this.secondTooltip = '',
+    this.onSecondPressed,
   });
 
   final String label;
@@ -276,6 +524,9 @@ class _Line extends StatelessWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
+  final IconData? secondIcon;
+  final String secondTooltip;
+  final VoidCallback? onSecondPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -301,6 +552,12 @@ class _Line extends StatelessWidget {
             ],
           ),
         ),
+        if (secondIcon case final second?)
+          IconButton(
+            tooltip: secondTooltip,
+            onPressed: onSecondPressed,
+            icon: Icon(second, size: 20),
+          ),
         IconButton(
           tooltip: tooltip,
           onPressed: onPressed,

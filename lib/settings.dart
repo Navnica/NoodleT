@@ -21,6 +21,25 @@ enum AppLanguage {
   Locale? get locale => this == system ? null : Locale(name);
 }
 
+/// The order of the torrent list.
+enum TorrentSort {
+  /// Newest first.
+  added,
+  name,
+
+  /// Least done first.
+  progress,
+
+  /// Largest first.
+  size,
+
+  /// Fastest first, download and upload together.
+  speed;
+
+  static TorrentSort parse(Object? name) =>
+      values.asNameMap()[name] ?? TorrentSort.added;
+}
+
 class AppSettings {
   const AppSettings({
     required this.downloadDir,
@@ -30,7 +49,15 @@ class AppSettings {
     this.seedAfterDownload = true,
     this.closeToTray = true,
     this.language = AppLanguage.system,
+    this.sort = TorrentSort.added,
+    this.checkUpdates = true,
   });
+
+  /// The ports a user may choose; below are the ones that need privileges.
+  static const minPort = 1025;
+  static const maxPort = 65535;
+
+  static bool isValidPort(int port) => port >= minPort && port <= maxPort;
 
   final String downloadDir;
 
@@ -52,21 +79,31 @@ class AppSettings {
 
   final AppLanguage language;
 
+  final TorrentSort sort;
+
+  /// Whether to look for a newer release on GitHub at startup.
+  final bool checkUpdates;
+
   AppSettings copyWith({
     String? downloadDir,
+    int? listenPort,
     int? downloadLimitKb,
     int? uploadLimitKb,
     bool? seedAfterDownload,
     bool? closeToTray,
     AppLanguage? language,
+    TorrentSort? sort,
+    bool? checkUpdates,
   }) => AppSettings(
     downloadDir: downloadDir ?? this.downloadDir,
-    listenPort: listenPort,
+    listenPort: listenPort ?? this.listenPort,
     downloadLimitKb: downloadLimitKb ?? this.downloadLimitKb,
     uploadLimitKb: uploadLimitKb ?? this.uploadLimitKb,
     seedAfterDownload: seedAfterDownload ?? this.seedAfterDownload,
     closeToTray: closeToTray ?? this.closeToTray,
     language: language ?? this.language,
+    sort: sort ?? this.sort,
+    checkUpdates: checkUpdates ?? this.checkUpdates,
   );
 
   Map<String, dynamic> toJson() => {
@@ -77,6 +114,8 @@ class AppSettings {
     'seed_after_download': seedAfterDownload,
     'close_to_tray': closeToTray,
     'language': language.name,
+    'sort': sort.name,
+    'check_updates': checkUpdates,
   };
 }
 
@@ -113,7 +152,7 @@ class SettingsStore {
       downloadDir: dir is String && dir.isNotEmpty
           ? dir
           : await _defaultDownloadDir(),
-      listenPort: port is int && port > 1024 && port < 65536
+      listenPort: port is int && AppSettings.isValidPort(port)
           ? port
           : 49152 + Random().nextInt(16000),
       downloadLimitKb: _limit(json['download_limit_kb']),
@@ -126,6 +165,8 @@ class SettingsStore {
         _ => !Platform.isLinux,
       },
       language: AppLanguage.parse(json['language']),
+      sort: TorrentSort.parse(json['sort']),
+      checkUpdates: json['check_updates'] != false,
     );
     if (json.isEmpty) await save(settings);
     return settings;

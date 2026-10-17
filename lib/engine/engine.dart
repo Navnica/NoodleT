@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:libtorrent_dart/libtorrent_dart.dart' as lt;
 import 'package:path/path.dart' as p;
 
+import '../version.dart';
+
 enum TorrentState { paused, checking, metadata, downloading, seeding, error }
 
 class Torrent {
@@ -23,6 +25,7 @@ class Torrent {
     required this.seeds,
     required this.added,
     required this.error,
+    this.sequential = false,
   });
 
   final String id;
@@ -47,6 +50,10 @@ class Torrent {
   /// Unix time the torrent was added at.
   final int added;
   final String error;
+
+  /// Whether the pieces come in order, so that a video can be watched
+  /// before it is complete.
+  final bool sequential;
 
   bool get isPaused => state == TorrentState.paused;
   bool get isComplete => size > 0 && done >= size;
@@ -88,6 +95,26 @@ class TorrentFile {
   double get progress => size > 0 ? (done / size).clamp(0, 1).toDouble() : 1;
 }
 
+/// A peer the torrent is connected to.
+class Peer {
+  const Peer({
+    required this.address,
+    required this.client,
+    required this.downloadRate,
+    required this.uploadRate,
+  });
+
+  /// "ip:port".
+  final String address;
+
+  /// The program on the other side, as it introduces itself; may be empty.
+  final String client;
+
+  /// Bytes per second.
+  final int downloadRate;
+  final int uploadRate;
+}
+
 class EngineException implements Exception {
   const EngineException(this.code, this.message);
 
@@ -99,6 +126,16 @@ class EngineException implements Exception {
   String toString() => 'EngineException($code): $message';
 }
 
+/// A magnet link of a torrent that is already in the list. Its trackers
+/// that the torrent did not have were added to it; [newTrackers] says how
+/// many.
+class DuplicateException extends EngineException {
+  const DuplicateException(this.newTrackers)
+    : super('duplicate', 'the torrent is already added');
+
+  final int newTrackers;
+}
+
 /// The torrent engine: libtorrent-rasterbar, the library qBittorrent is built
 /// on, through the libtorrent_dart package.
 ///
@@ -106,12 +143,21 @@ class EngineException implements Exception {
 ///   torrents.json        the list of torrents
 ///   resume/`id`.resume   libtorrent resume data of each torrent
 ///   session.dat          session state, most importantly the DHT nodes
+///
+/// While running, the files are written in the background, one write at a
+/// time per file; [shutdown] writes the final state synchronously.
 class TorrentEngine {
   lt.Session? _session;
   late String _stateDir;
   final _entries = <String, _Entry>{};
   final _fileChoices = <String>[];
   DateTime _lastAutosave = DateTime.now();
+
+  /// The last write or deletion asked for each file, by path; a background
+  /// write that is no longer the last one is dropped.
+  final _writes = <String, int>{};
+  var _writeCount = 0;
+  Future<void> _writing = Future.value();
 
   static const _autosaveInterval = Duration(seconds: 30);
 
@@ -122,6 +168,9 @@ class TorrentEngine {
   File get _sessionFile => File(p.join(_stateDir, 'session.dat'));
   File _resumeFile(String id) =>
       File(p.join(_stateDir, 'resume', '$id.resume'));
+
+  /// Completes once every background write so far is on disk.
+  Future<void> get flushed => _writing;
 
   /// Starts the session and restores the torrents of the previous run.
   /// Rate limits are in bytes per second, 0 means unlimited. Returns the
@@ -146,6 +195,9 @@ class TorrentEngine {
   /// Adds a magnet link and returns the id of the torrent. Once its metadata
   /// arrives and shows more than one file, the torrent is paused and its id
   /// comes out of [takeFileChoices], so that the user can pick the files.
+  ///
+  /// A magnet link of a torrent already in the list throws a
+  /// [DuplicateException], after its new trackers are added to the torrent.
   String addMagnet(String uri, String savePath) {
     final session = _running;
     final lt.MagnetUriInfo info;
@@ -156,18 +208,33 @@ class TorrentEngine {
     }
     final id = info.infohashHex.toLowerCase();
     if (id.isEmpty) throw const EngineException('bad_magnet', 'no info-hash');
-    _checkNew(id);
+    if (_entries[id] case final existing?) {
+      throw DuplicateException(_addTrackers(existing, info.trackers));
+    }
     _wrap('add_failed', () {
       final handle = session.addMagnet(magnetUri: uri, savePath: savePath);
-      _adopt(id, handle, name: info.name, savePath: savePath, magnet: uri);
-      _entries[id]!.askFiles = true;
+      _adopt(
+        id,
+        handle,
+        name: info.name,
+        savePath: savePath,
+        magnet: uri,
+        choosing: true,
+      );
     });
     return id;
   }
 
   /// Adds a .torrent file and returns the id of the torrent. A [paused] one
-  /// downloads nothing until [resume], e.g. while the user picks its files.
-  String addFile(String torrentPath, String savePath, {bool paused = false}) {
+  /// downloads nothing until [resume]. With [chooseFiles], a torrent of
+  /// several files stays paused and comes out of [takeFileChoices] for the
+  /// user to pick the files; one of a single file starts right away.
+  String addFile(
+    String torrentPath,
+    String savePath, {
+    bool paused = false,
+    bool chooseFiles = false,
+  }) {
     final session = _running;
     final Uint8List data;
     try {
@@ -183,6 +250,7 @@ class TorrentEngine {
     }
     final id = info.infohashHex.toLowerCase();
     _checkNew(id);
+    final startPaused = paused || chooseFiles;
     _wrap('add_failed', () {
       final handle = session.addTorrentFromTags([
         lt.LibtorrentTagItem.bytesValue(lt.LibtorrentTag.torTorrent, data),
@@ -195,7 +263,7 @@ class TorrentEngine {
           savePath,
         ),
         // Paused from the start, so that not a single byte comes first.
-        if (paused)
+        if (startPaused)
           lt.LibtorrentTagItem.intValue(lt.LibtorrentTag.torPaused, 1),
       ]);
       _adopt(
@@ -204,19 +272,48 @@ class TorrentEngine {
         name: info.name,
         savePath: savePath,
         magnet: '',
-        paused: paused,
+        paused: startPaused,
       );
     });
+    if (chooseFiles) {
+      final entry = _entries[id]!;
+      if (files(id).length > 1) {
+        _offerFiles(entry);
+      } else if (!paused) {
+        resume(id);
+      }
+    }
     return id;
   }
 
-  /// Magnet links whose metadata has just shown several files; each is paused
-  /// until the user picks the files. Empties the list.
+  /// Torrents of several files that wait paused for the user to pick the
+  /// files, answered with [chooseFiles] or [remove]. Empties the list.
+  ///
+  /// A torrent left waiting when NoodleT was closed comes out again after
+  /// the next [start].
   List<String> takeFileChoices() {
     final ids = List.of(_fileChoices);
     _fileChoices.clear();
     return ids;
   }
+
+  /// Answers a torrent from [takeFileChoices]: downloads only the files
+  /// [wanted] into [savePath], or into the folder it was added with when
+  /// null, and starts it.
+  void chooseFiles(String id, Set<int> wanted, {String? savePath}) =>
+      _wrap('failed', () {
+        final entry = _find(id);
+        final priorities = List.of(_priorities(entry));
+        for (var i = 0; i < priorities.length; i++) {
+          priorities[i] = wanted.contains(i) ? _defaultPriority : _skipPriority;
+        }
+        _prioritize(entry, priorities);
+        if (savePath != null && savePath != entry.savePath) {
+          _move(entry, savePath);
+        }
+        entry.choosing = false;
+        _resumeEntry(entry);
+      });
 
   /// The state of every torrent. Also writes resume data when it is due.
   List<Torrent> poll() {
@@ -245,11 +342,12 @@ class TorrentEngine {
         final name = _nameOf(entry.handle);
         if (name.isNotEmpty) entry.name = name;
         indexChanged = true;
-        if (entry.askFiles) {
-          entry.askFiles = false;
+        if (entry.choosing) {
           if (files(entry.id).length > 1) {
             _pauseEntry(entry);
-            _fileChoices.add(entry.id);
+            _offerFiles(entry);
+          } else {
+            entry.choosing = false;
           }
         }
       }
@@ -257,6 +355,7 @@ class TorrentEngine {
       entry.finished = finished;
       if (gotMetadata ||
           justFinished ||
+          _prioritiesApplied(entry) ||
           (autosave && _needsSave(entry.handle))) {
         _saveResume(entry);
       }
@@ -278,6 +377,7 @@ class TorrentEngine {
           seeds: status.numSeeds,
           added: entry.added,
           error: status.error,
+          sequential: entry.sequential,
         ),
       );
     }
@@ -295,23 +395,25 @@ class TorrentEngine {
     _saveResume(entry);
   }
 
-  void resume(String id) => _wrap('failed', () {
-    final entry = _find(id);
+  void resume(String id) => _wrap('failed', () => _resumeEntry(_find(id)));
+
+  void _resumeEntry(_Entry entry) {
     entry.handle.clearError();
     entry.handle.unsetFlags(lt.LibtorrentTorrentFlags.autoManaged);
     entry.handle.resume();
     entry.paused = false;
     _saveIndex();
-  });
+  }
 
   /// The files of torrent [id], in the order of the torrent. Empty while a
   /// magnet link is still waiting for its metadata.
   List<TorrentFile> files(String id) => _wrap('failed', () {
-    final handle = _find(id).handle;
+    final entry = _find(id);
+    final handle = entry.handle;
     final entries = handle.getFiles();
     if (entries.isEmpty) return const <TorrentFile>[];
     final progress = handle.getFileProgress(flags: _pieceGranularity);
-    final priorities = handle.getFilePriorities();
+    final priorities = _priorities(entry);
     return [
       for (final file in entries)
         // Padding between files to align them with pieces; never on disk.
@@ -327,6 +429,20 @@ class TorrentEngine {
     ];
   });
 
+  /// Where the torrent [id] is on disk: its own folder when it has several
+  /// files, its only file otherwise, or the save folder while a magnet link
+  /// has no metadata yet. [isFile] tells the second case.
+  ({String path, bool isFile}) contentPath(String id) => _wrap('failed', () {
+    final entry = _find(id);
+    final files = this.files(id);
+    if (files.isEmpty) return (path: entry.savePath, isFile: false);
+    final parts = p.posix.split(files.first.path);
+    if (files.length == 1) {
+      return (path: p.joinAll([entry.savePath, ...parts]), isFile: true);
+    }
+    return (path: p.join(entry.savePath, parts.first), isFile: false);
+  });
+
   /// Skips the files [indexes] of torrent [id] or takes them back. A skipped
   /// file is not downloaded, and the torrent counts as finished once the
   /// wanted ones are.
@@ -336,23 +452,140 @@ class TorrentEngine {
     required bool wanted,
   }) => _wrap('failed', () {
     final entry = _find(id);
-    final priorities = entry.handle.getFilePriorities();
+    final priorities = List.of(_priorities(entry));
     for (final index in indexes) {
       if (index >= 0 && index < priorities.length) {
         priorities[index] = wanted ? _defaultPriority : _skipPriority;
       }
     }
+    _prioritize(entry, priorities);
+  });
+
+  /// The file priorities of [entry], the ones last asked for while
+  /// libtorrent has not applied them yet.
+  List<int> _priorities(_Entry entry) =>
+      entry.pendingPriorities ?? entry.handle.getFilePriorities();
+
+  /// libtorrent applies new file priorities in the background, through its
+  /// disk thread, and until then reports and saves the old ones. So they
+  /// are kept here until it has them, and the resume data, where the choice
+  /// lives, is saved then; see [_prioritiesApplied].
+  void _prioritize(_Entry entry, List<int> priorities) {
     entry.handle.prioritizeFiles(priorities);
-    // The choice lives in the resume data.
-    _saveResume(entry);
+    entry.pendingPriorities = priorities;
+  }
+
+  /// Before the last save: gives libtorrent a moment to apply the file
+  /// priorities just asked for, so that they make it into the resume data.
+  void _awaitPriorities(_Entry entry) {
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (entry.pendingPriorities != null && !_prioritiesApplied(entry)) {
+      if (DateTime.now().isAfter(deadline)) return;
+      sleep(const Duration(milliseconds: 10));
+    }
+  }
+
+  /// Whether libtorrent has just applied the priorities of [_prioritize].
+  bool _prioritiesApplied(_Entry entry) {
+    final pending = entry.pendingPriorities;
+    if (pending == null) return false;
+    try {
+      final actual = entry.handle.getFilePriorities();
+      for (var i = 0; i < pending.length; i++) {
+        if (i >= actual.length || actual[i] != pending[i]) return false;
+      }
+    } on lt.LibtorrentException {
+      return false;
+    }
+    entry.pendingPriorities = null;
+    return true;
+  }
+
+  /// Downloads the pieces of torrent [id] in order, or in the order that
+  /// gets the whole torrent fastest.
+  void setSequential(String id, {required bool sequential}) =>
+      _wrap('failed', () {
+        final entry = _find(id);
+        entry.handle.setSequentialDownload(sequential);
+        entry.sequential = sequential;
+        _saveIndex();
+        _saveResume(entry);
+      });
+
+  /// Moves the files of torrent [id], downloaded or not, to the folder
+  /// [savePath]; the download goes on there. libtorrent moves them in the
+  /// background.
+  void move(String id, String savePath) =>
+      _wrap('failed', () => _move(_find(id), savePath));
+
+  void _move(_Entry entry, String savePath) {
+    Directory(savePath).createSync(recursive: true);
+    entry.handle.moveStorage(savePath);
+    entry.savePath = savePath;
+    _saveIndex();
+  }
+
+  /// The trackers of torrent [id].
+  List<String> trackers(String id) =>
+      _wrap('failed', () => _find(id).handle.getTrackers());
+
+  /// Adds the trackers [urls] that torrent [id] does not have yet; returns
+  /// how many were new.
+  int addTrackers(String id, Iterable<String> urls) =>
+      _wrap('failed', () => _addTrackers(_find(id), urls));
+
+  int _addTrackers(_Entry entry, Iterable<String> urls) {
+    final added = _attachTrackers(entry, urls);
+    if (added.isNotEmpty) {
+      entry.trackers.addAll(added);
+      entry.handle.forceReannounce();
+      _saveIndex();
+      _saveResume(entry);
+    }
+    return added.length;
+  }
+
+  /// Gives the torrent those of [urls] it lacks; returns them.
+  List<String> _attachTrackers(_Entry entry, Iterable<String> urls) {
+    final known = entry.handle.getTrackers().toSet();
+    final added = <String>[];
+    for (final url in urls.map((u) => u.trim())) {
+      if (url.isEmpty || !known.add(url)) continue;
+      entry.handle.addTracker(url, tier: known.length - 1);
+      added.add(url);
+    }
+    return added;
+  }
+
+  /// The peers torrent [id] is connected to, fastest first.
+  List<Peer> peers(String id) => _wrap('failed', () {
+    final peers = [
+      for (final peer in _find(id).handle.getPeerInfo())
+        Peer(
+          address: peer.ip.contains(':')
+              ? '[${peer.ip}]:${peer.port}'
+              : '${peer.ip}:${peer.port}',
+          client: peer.client,
+          downloadRate: peer.payloadDownSpeed,
+          uploadRate: peer.payloadUpSpeed,
+        ),
+    ];
+    peers.sort(
+      (a, b) =>
+          (b.downloadRate + b.uploadRate) - (a.downloadRate + a.uploadRate),
+    );
+    return peers;
   });
 
   void remove(String id, {required bool deleteFiles}) => _wrap('failed', () {
     final entry = _find(id);
     _running.removeTorrent(entry.handle, deleteFiles: deleteFiles);
     _entries.remove(id);
+    _fileChoices.remove(id);
     _saveIndex();
     final resume = _resumeFile(id);
+    // A background write still to come must not bring it back.
+    _writes[resume.path] = ++_writeCount;
     if (resume.existsSync()) resume.deleteSync();
   });
 
@@ -363,6 +596,29 @@ class TorrentEngine {
     session.setUploadRateLimit(upload > 0 ? upload : 0);
   });
 
+  /// Listens for peers on [port] from now on.
+  void setListenPort(int port) =>
+      _wrap('failed', () => _listenOn(_running, port));
+
+  /// The port the session listens on, 0 when it could not open one.
+  int get listenPort {
+    try {
+      return _running.listenPort;
+    } on lt.LibtorrentException {
+      return 0;
+    }
+  }
+
+  /// Whether a peer has connected to us since the start: the port is open
+  /// to the internet.
+  bool get hasIncomingConnections {
+    try {
+      return _running.getStatus().hasIncomingConnections;
+    } on lt.LibtorrentException {
+      return false;
+    }
+  }
+
   /// Saves the state of every torrent and stops the session.
   void shutdown() {
     final session = _session;
@@ -371,14 +627,16 @@ class TorrentEngine {
     try {
       session.pause();
       for (final entry in _entries.values) {
-        _saveResume(entry);
+        _awaitPriorities(entry);
+        _saveResume(entry, sync: true);
       }
-      _saveIndex();
-      _write(_sessionFile, session.getState());
+      _saveIndex(sync: true);
+      _write(_sessionFile, session.getState(), sync: true);
     } on Object {
       // Closing must go on: whatever was saved earlier still stands.
     } finally {
       _entries.clear();
+      _fileChoices.clear();
       session.close();
     }
   }
@@ -446,25 +704,39 @@ class TorrentEngine {
     };
     ints.forEach(s.setIntSetting);
     bools.forEach(s.setBoolSetting);
-    s.setStringSetting(_Setting.userAgent, 'NoodleT/1.0.0');
-    s.setStringSetting(_Setting.peerFingerprint, '-NT1000-');
+    s.setStringSetting(_Setting.userAgent, 'NoodleT/$appVersion');
+    s.setStringSetting(_Setting.peerFingerprint, peerFingerprint(appVersion));
     s.setStringSetting(
       _Setting.dhtBootstrapNodes,
       'dht.libtorrent.org:25401,dht.transmissionbt.com:6881,'
       'router.bittorrent.com:6881,router.utorrent.com:6881,'
       'dht.aelitis.com:6881',
     );
-    s.setStringSetting(_Setting.listenInterfaces, '0.0.0.0:$port,[::]:$port');
+    _listenOn(s, port);
     s.setDownloadRateLimit(download > 0 ? download : 0);
     s.setUploadRateLimit(upload > 0 ? upload : 0);
+  }
+
+  void _listenOn(lt.Session s, int port) =>
+      s.setStringSetting(_Setting.listenInterfaces, '0.0.0.0:$port,[::]:$port');
+
+  /// The Azureus-style peer id prefix: "-NT" and four version digits, e.g.
+  /// "-NT1300-" for 1.3.0. Peers show it as the client's name and version.
+  static String peerFingerprint(String version) {
+    final digits = [
+      for (final part in version.split('.').take(4))
+        (int.tryParse(part) ?? 0).clamp(0, 9).toString(),
+    ];
+    while (digits.length < 4) {
+      digits.add('0');
+    }
+    return '-NT${digits.join()}-';
   }
 
   // ----------------------------------------------------------- torrents ----
 
   void _checkNew(String id) {
-    if (_entries.containsKey(id)) {
-      throw const EngineException('duplicate', 'the torrent is already added');
-    }
+    if (_entries.containsKey(id)) throw const DuplicateException(0);
   }
 
   _Entry _find(String id) =>
@@ -478,6 +750,7 @@ class TorrentEngine {
     required String savePath,
     required String magnet,
     bool paused = false,
+    bool choosing = false,
   }) {
     final entry = _Entry(
       id: id,
@@ -487,11 +760,19 @@ class TorrentEngine {
       magnet: magnet,
       added: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       paused: paused,
+      choosing: choosing,
     );
     _configure(entry);
     _entries[id] = entry;
     _saveIndex();
     _saveResume(entry);
+  }
+
+  /// Puts the torrent on the list of [takeFileChoices]; it is paused already.
+  void _offerFiles(_Entry entry) {
+    entry.choosing = true;
+    if (!_fileChoices.contains(entry.id)) _fileChoices.add(entry.id);
+    _saveIndex();
   }
 
   /// qBittorrent's per-torrent limits, and no automatic queueing: a torrent
@@ -501,6 +782,7 @@ class TorrentEngine {
     handle.unsetFlags(lt.LibtorrentTorrentFlags.autoManaged);
     handle.setMaxConnections(100);
     handle.setMaxUploads(4);
+    if (entry.sequential) handle.setSequentialDownload(true);
     entry.paused ? handle.pause() : handle.resume();
   }
 
@@ -528,9 +810,23 @@ class TorrentEngine {
         added: record['added'] as int? ?? 0,
         paused: record['paused'] == true,
         hasMetadata: record['has_metadata'] == true,
+        sequential: record['sequential'] == true,
+        choosing: record['choosing'] == true,
       );
+      if (record['trackers'] case final List<dynamic> trackers) {
+        entry.trackers.addAll(trackers.whereType<String>());
+      }
       _configure(entry);
       _entries[id] = entry;
+      // Resume data of a magnet link without metadata has none of them.
+      try {
+        _attachTrackers(entry, entry.trackers);
+      } on lt.LibtorrentException {
+        // The torrent keeps the trackers it has.
+      }
+      // Closed while the user was picking the files: ask again. A magnet
+      // link without metadata asks once it arrives, as in the run before.
+      if (entry.choosing && entry.hasMetadata) _fileChoices.add(id);
     }
   }
 
@@ -623,16 +919,16 @@ class TorrentEngine {
     }
   }
 
-  void _saveResume(_Entry entry) {
+  void _saveResume(_Entry entry, {bool sync = false}) {
     try {
       final data = entry.handle.getResumeData(flags: _saveInfoDict);
-      if (data.isNotEmpty) _write(_resumeFile(entry.id), data);
+      if (data.isNotEmpty) _write(_resumeFile(entry.id), data, sync: sync);
     } on Object {
       // The next autosave tries again.
     }
   }
 
-  void _saveIndex() {
+  void _saveIndex({bool sync = false}) {
     final records = [
       for (final entry in _entries.values)
         {
@@ -643,15 +939,40 @@ class TorrentEngine {
           'added': entry.added,
           'paused': entry.paused,
           'has_metadata': entry.hasMetadata,
+          'sequential': entry.sequential,
+          'choosing': entry.choosing,
+          if (entry.trackers.isNotEmpty) 'trackers': entry.trackers,
         },
     ];
-    _write(_indexFile, utf8.encode(jsonEncode(records)));
+    _write(_indexFile, utf8.encode(jsonEncode(records)), sync: sync);
   }
 
   /// Writes to a temporary file first so a crash never leaves half a file.
-  static void _write(File file, List<int> data) {
-    final tmp = File('${file.path}.tmp')..writeAsBytesSync(data, flush: true);
-    tmp.renameSync(file.path);
+  /// In the background unless [sync]; of several background writes to one
+  /// file, only the last one asked for reaches it.
+  void _write(File file, List<int> data, {bool sync = false}) {
+    final number = ++_writeCount;
+    _writes[file.path] = number;
+    if (sync) {
+      final tmp = File('${file.path}.tmp')..writeAsBytesSync(data, flush: true);
+      tmp.renameSync(file.path);
+      return;
+    }
+    bool current() => _writes[file.path] == number;
+    _writing = _writing.then((_) async {
+      if (!current()) return;
+      try {
+        final tmp = File('${file.path}.$number.tmp');
+        await tmp.writeAsBytes(data, flush: true);
+        if (current()) {
+          await tmp.rename(file.path);
+        } else {
+          await tmp.delete();
+        }
+      } on FileSystemException {
+        // The next save tries again.
+      }
+    });
   }
 
   T _wrap<T>(String code, T Function() action) {
@@ -689,23 +1010,33 @@ class _Entry {
     required this.added,
     this.paused = false,
     this.hasMetadata = false,
+    this.sequential = false,
+    this.choosing = false,
   });
 
   final String id;
   final lt.TorrentHandle handle;
   String name;
-  final String savePath;
+  String savePath;
 
   /// The link the torrent was added with: the way back if resume data is lost.
   final String magnet;
   final int added;
   bool paused;
   bool hasMetadata;
+  bool sequential;
   bool finished = false;
 
-  /// A magnet link added in this run: its files are to be offered once its
-  /// metadata is known.
-  bool askFiles = false;
+  /// File priorities asked for that libtorrent has not applied yet.
+  List<int>? pendingPriorities;
+
+  /// Trackers the user or a repeated magnet link added.
+  final trackers = <String>[];
+
+  /// The user is to pick the files: a magnet link once its metadata shows
+  /// several, or a torrent paused on [TorrentEngine.takeFileChoices] until
+  /// [TorrentEngine.chooseFiles]. Kept across runs.
+  bool choosing;
 
   /// When the engine last asked the DHT for peers itself; see `_retryDht`.
   /// Starts at the time the torrent is added, so the first retry comes one

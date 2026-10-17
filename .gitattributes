@@ -1,0 +1,13 @@
+# LF everywhere, whatever core.autocrlf says: Flutter and dart format write
+# LF, and with CRLF checkouts the files Flutter regenerates on every build
+# (the plugin registrants) showed up as changed.
+* text=auto eol=lf
+
+# Read by Windows-only tools.
+*.iss text eol=crlf
+*.rc text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.ico binary

@@ -1,0 +1,32 @@
+# Checks every push and pull request: formatting, the analyzer and the tests.
+# On Windows, the platform NoodleT is released for: the engine tests drive
+# the real libtorrent build that libtorrent_dart ships for it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.7
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyzer
+        run: flutter analyze
+
+      - name: Tests
+        run: flutter test

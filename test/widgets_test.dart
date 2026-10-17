@@ -201,7 +201,7 @@ void main() {
           wanted: true,
         ),
     ];
-    Set<int>? result = {-1};
+    FilePick? result = (files: {-1}, folder: '');
     await tester.pumpWidget(
       _app(
         Builder(
@@ -209,6 +209,7 @@ void main() {
             onPressed: () async => result = await showFileChoiceDialog(
               context,
               name: 'Album',
+              folder: r'C:\Downloads',
               files: files,
             ),
             child: const Text('open'),
@@ -224,6 +225,7 @@ void main() {
     await open();
     expect(find.text(_en.chooseFilesTitle), findsOne);
     expect(find.text('one.mkv'), findsOne);
+    expect(find.text(r'C:\Downloads'), findsOne); // where it goes
     // Sizes only: nothing is downloaded yet.
     expect(find.textContaining('%'), findsNothing);
     final boxes = find.byType(Checkbox);
@@ -231,7 +233,9 @@ void main() {
     await tester.pump();
     await tester.tap(find.text(_en.add));
     await tester.pumpAndSettle();
-    expect(result, {0, 2});
+    expect(result?.files, {0, 2});
+    expect(result?.folder, r'C:\Downloads');
+    expect(find.text(_en.saveTo), findsNothing); // closed
 
     await open();
     await tester.tap(find.text(_en.cancel));

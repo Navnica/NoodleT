@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -13,10 +14,14 @@ import 'package:window_manager/window_manager.dart';
 /// the system so that quitting can hide the window before the torrents are
 /// saved, which takes a few seconds.
 class Tray with WindowListener {
-  Tray({required this.onQuit});
+  Tray({required this.onQuit, this.onPauseAll, this.onResumeAll});
 
   /// Saves the torrents; the process ends right after.
   final VoidCallback onQuit;
+
+  /// The menu items that stop and start every torrent at once.
+  final VoidCallback? onPauseAll;
+  final VoidCallback? onResumeAll;
 
   /// Tells the Windows runner whether the hidden window is in the tray, so
   /// that a second launch shows it instead of waiting for it to quit (see
@@ -33,7 +38,7 @@ class Tray with WindowListener {
   _TrayMenu? _menu;
   final _retired = <_TrayMenu>[];
   bool _menuOpen = false;
-  (String, String)? _labels;
+  List<String>? _labels;
   String? _tooltip;
   bool _enabled = false;
   bool _quitting = false;
@@ -56,6 +61,8 @@ class Tray with WindowListener {
     required String open,
     required String exit,
     required String tooltip,
+    String pauseAll = '',
+    String resumeAll = '',
     List<String> downloads = const [],
   }) {
     _enabled = enabled;
@@ -66,14 +73,15 @@ class Tray with WindowListener {
     final icon = _icon ??= _createIcon();
     if (icon == null) return;
     final menu = _menu;
+    final labels = [open, exit, pauseAll, resumeAll];
     if (menu == null ||
-        _labels != (open, exit) ||
+        !listEquals(_labels, labels) ||
         menu.downloads.length != downloads.length) {
       // An open menu keeps its rows until it closes; the next refresh after
       // that rebuilds it.
       if (menu == null || !_menuOpen) {
-        _labels = (open, exit);
-        _setMenu(icon, open, exit, downloads);
+        _labels = labels;
+        _setMenu(icon, open, exit, pauseAll, resumeAll, downloads);
       }
     } else {
       menu.relabel(downloads);
@@ -132,6 +140,8 @@ class Tray with WindowListener {
     TrayIcon icon,
     String open,
     String exit,
+    String pauseAll,
+    String resumeAll,
     List<String> downloads,
   ) {
     final menu = Menu.create();
@@ -151,6 +161,12 @@ class Tray with WindowListener {
     final rows = [for (final line in downloads) ?addItem(line, show)];
     if (rows.isNotEmpty) menu.addSeparator();
     addItem(open, show);
+    if (onPauseAll case final onClick? when pauseAll.isNotEmpty) {
+      addItem(pauseAll, onClick);
+    }
+    if (onResumeAll case final onClick? when resumeAll.isNotEmpty) {
+      addItem(resumeAll, onClick);
+    }
     menu.addSeparator();
     addItem(exit, quit);
     menu.addListener((event) {

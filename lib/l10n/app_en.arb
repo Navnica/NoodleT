@@ -226,5 +226,63 @@
       }
     }
   },
-  "engineFailed": "The torrent engine could not be started"
+  "engineFailed": "The torrent engine could not be started",
+  "pauseAll": "Pause all",
+  "resumeAll": "Resume all",
+  "search": "Search",
+  "filterAll": "All",
+  "filterActive": "Active",
+  "filterDone": "Done",
+  "filterPaused": "Paused",
+  "sortBy": "Sort",
+  "sortAdded": "Newest first",
+  "sortName": "By name",
+  "sortProgress": "By progress",
+  "sortSize": "Largest first",
+  "sortSpeed": "Fastest first",
+  "nothingFound": "No torrents match",
+  "saveTo": "Save to",
+  "move": "Move",
+  "sequential": "Download in order",
+  "sequentialHint": "Lets a video play before it is complete; the whole torrent may take longer",
+  "trackers": "Trackers",
+  "noTrackers": "No trackers: peers come from DHT and other peers",
+  "addTrackers": "Add trackers",
+  "trackersHint": "One address per line",
+  "noPeers": "Not connected to anyone yet",
+  "trackersAdded": "{count, plural, =1{The torrent is already listed; 1 new tracker was added to it} other{The torrent is already listed; {count} new trackers were added to it}}",
+  "@trackersAdded": {
+    "description": "A magnet link of a torrent already in the list brought trackers it did not have.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "listenPort": "Port for incoming connections",
+  "portHint": "{min}–{max}",
+  "@portHint": {
+    "placeholders": {
+      "min": {
+        "type": "int"
+      },
+      "max": {
+        "type": "int"
+      }
+    }
+  },
+  "portOpen": "Open: peers connect from outside",
+  "portUnknown": "No incoming connections yet. If it stays so, forward this port on the router",
+  "portClosed": "The port could not be opened",
+  "checkUpdates": "Check for updates",
+  "checkUpdatesHint": "At startup, on the NoodleT page on GitHub",
+  "updateAvailable": "NoodleT {version} is out",
+  "@updateAvailable": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "updateDownload": "Download"
 }

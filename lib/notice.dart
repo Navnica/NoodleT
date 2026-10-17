@@ -5,6 +5,10 @@ enum NoticeKind {
   /// [Notice.detail] is the name of the torrent.
   finished,
   duplicate,
+
+  /// A magnet link of a torrent already in the list brought new trackers;
+  /// [Notice.detail] is how many.
+  trackersAdded,
   badMagnet,
   badTorrent,
   unreadable,
@@ -15,6 +19,9 @@ enum NoticeKind {
 
   /// [Notice.detail] is the whole text, as the engine words it.
   engine,
+
+  /// A newer release is out; [Notice.detail] is its version.
+  update,
 }
 
 class Notice {

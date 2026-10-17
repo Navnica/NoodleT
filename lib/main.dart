@@ -28,7 +28,11 @@ Future<void> main(List<String> args) async {
     failure = e;
   }
   if (failure == null) {
-    tray = Tray(onQuit: controller!.shutdown);
+    tray = Tray(
+      onQuit: controller!.shutdown,
+      onPauseAll: controller.pauseAll,
+      onResumeAll: controller.resumeAll,
+    );
     await tray.start();
   }
 

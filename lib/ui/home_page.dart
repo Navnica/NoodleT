@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:ui';
 
 import 'package:desktop_drop/desktop_drop.dart';
@@ -11,10 +10,13 @@ import '../app_controller.dart';
 import '../engine/engine.dart';
 import '../input.dart';
 import '../notice.dart';
+import '../settings.dart';
 import '../tray.dart';
+import '../updates.dart';
 import 'details_sheet.dart';
 import 'dialogs.dart';
 import 'format.dart';
+import 'system.dart';
 import '../l10n/app_localizations.dart';
 import 'torrent_row.dart';
 
@@ -49,6 +51,9 @@ class _HomePageState extends State<HomePage> {
   Future<void> _choosing = Future.value();
   late final AppLifecycleListener _lifecycle;
   final _input = TextEditingController();
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  _Filter _filter = _Filter.all;
   bool _dragging = false;
 
   AppController get _controller => widget.controller;
@@ -78,6 +83,7 @@ class _HomePageState extends State<HomePage> {
       }
     });
     _controller.addListener(_syncTray);
+    _search.addListener(() => setState(() {}));
   }
 
   @override
@@ -95,6 +101,8 @@ class _HomePageState extends State<HomePage> {
     _fileChoices.cancel();
     _lifecycle.dispose();
     _input.dispose();
+    _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -104,6 +112,10 @@ class _HomePageState extends State<HomePage> {
     final text = switch (notice.kind) {
       NoticeKind.finished => s.finished(notice.detail),
       NoticeKind.duplicate => s.duplicate,
+      NoticeKind.trackersAdded => s.trackersAdded(
+        int.tryParse(notice.detail) ?? 0,
+      ),
+      NoticeKind.update => s.updateAvailable(notice.detail),
       NoticeKind.badMagnet => s.badMagnet,
       NoticeKind.badTorrent => s.badTorrent,
       NoticeKind.unreadable => s.unreadable,
@@ -118,6 +130,15 @@ class _HomePageState extends State<HomePage> {
           content: Text(text),
           // Above the dock, not over it.
           margin: const EdgeInsets.fromLTRB(16, 0, 16, _Dock.reserved - 12),
+          action: notice.kind == NoticeKind.update
+              ? SnackBarAction(
+                  label: s.updateDownload,
+                  onPressed: () => openUrl(Updates.releasePage),
+                )
+              : null,
+          duration: notice.kind == NoticeKind.update
+              ? const Duration(seconds: 15)
+              : const Duration(seconds: 4),
         ),
       );
   }
@@ -134,11 +155,12 @@ class _HomePageState extends State<HomePage> {
       context,
       name: choice.name,
       files: choice.files,
+      folder: choice.savePath,
     );
     if (chosen == null) {
       _controller.cancelAdd(choice.id);
     } else {
-      _controller.chooseFiles(choice.id, chosen);
+      _controller.chooseFiles(choice.id, chosen.files, savePath: chosen.folder);
     }
   }
 
@@ -159,6 +181,8 @@ class _HomePageState extends State<HomePage> {
       enabled: _controller.settings.closeToTray,
       open: s.trayOpen,
       exit: s.trayExit,
+      pauseAll: s.pauseAll,
+      resumeAll: s.resumeAll,
       downloads: [
         for (final torrent in active.take(_trayRows))
           '${_shorten(torrent.name)} — ${_trayStatus(torrent, s)}',
@@ -218,13 +242,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// Opens the torrent's own folder, or selects its file when it has one.
   void _openFolder(Torrent torrent) {
-    final command = Platform.isWindows
-        ? 'explorer.exe'
-        : Platform.isMacOS
-        ? 'open'
-        : 'xdg-open';
-    Process.run(command, [torrent.savePath]).ignore();
+    final content = _controller.contentPath(torrent);
+    reveal(content.path, isFile: content.isFile);
   }
 
   void _openSettings() => showSettingsDialog(context, _controller);
@@ -246,6 +267,10 @@ class _HomePageState extends State<HomePage> {
             const SingleActivator(LogicalKeyboardKey.keyV, control: true):
                 _paste,
             const SingleActivator(LogicalKeyboardKey.keyV, meta: true): _paste,
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                _searchFocus.requestFocus,
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                _searchFocus.requestFocus,
           },
           child: Focus(
             autofocus: true,
@@ -264,15 +289,52 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  /// The torrents that pass the search and the filter.
+  List<Torrent> _shown(List<Torrent> torrents) {
+    final query = _search.text.trim().toLowerCase();
+    return [
+      for (final t in torrents)
+        if (_filter.accepts(t) &&
+            (query.isEmpty || t.name.toLowerCase().contains(query)))
+          t,
+    ];
+  }
+
   Widget _layout() {
     final torrents = _controller.torrents;
+    final shown = _shown(torrents);
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 900),
         child: Stack(
           children: [
             Positioned.fill(
-              child: torrents.isEmpty ? const _EmptyState() : _list(torrents),
+              child: torrents.isEmpty
+                  ? const _EmptyState()
+                  : Column(
+                      children: [
+                        _Toolbar(
+                          search: _search,
+                          searchFocus: _searchFocus,
+                          filter: _filter,
+                          sort: _controller.settings.sort,
+                          canPauseAll: _controller.canPauseAll,
+                          canResumeAll: _controller.canResumeAll,
+                          onFilter: (filter) =>
+                              setState(() => _filter = filter),
+                          onSort: (sort) => _controller.updateSettings(
+                            _controller.settings.copyWith(sort: sort),
+                          ),
+                          onPauseAll: _controller.pauseAll,
+                          onResumeAll: _controller.resumeAll,
+                        ),
+                        Expanded(
+                          child: shown.isEmpty
+                              ? const _NothingFound()
+                              : _list(shown),
+                        ),
+                      ],
+                    ),
             ),
             Align(
               alignment: Alignment.bottomCenter,
@@ -302,7 +364,7 @@ class _HomePageState extends State<HomePage> {
 
   /// The cards scroll under the floating dock.
   Widget _list(List<Torrent> torrents) => ListView.separated(
-    padding: const EdgeInsets.fromLTRB(14, 14, 14, _Dock.reserved),
+    padding: const EdgeInsets.fromLTRB(14, 4, 14, _Dock.reserved),
     itemCount: torrents.length,
     separatorBuilder: (_, _) => const SizedBox(height: 8),
     itemBuilder: (context, index) {
@@ -317,6 +379,172 @@ class _HomePageState extends State<HomePage> {
       );
     },
   );
+}
+
+/// Which torrents the list shows.
+enum _Filter {
+  all,
+
+  /// Running: downloading, checking or seeding.
+  active,
+
+  /// Everything wanted is downloaded.
+  done,
+
+  /// Stopped before it was done.
+  paused;
+
+  bool accepts(Torrent t) => switch (this) {
+    all => true,
+    active => !t.isPaused && t.state != TorrentState.error,
+    done => t.isComplete,
+    paused => t.isPaused && !t.isComplete,
+  };
+
+  String label(AppLocalizations s) => switch (this) {
+    all => s.filterAll,
+    active => s.filterActive,
+    done => s.filterDone,
+    paused => s.filterPaused,
+  };
+}
+
+/// Search, filter, order and the buttons for all torrents at once, above
+/// the list.
+class _Toolbar extends StatelessWidget {
+  const _Toolbar({
+    required this.search,
+    required this.searchFocus,
+    required this.filter,
+    required this.sort,
+    required this.canPauseAll,
+    required this.canResumeAll,
+    required this.onFilter,
+    required this.onSort,
+    required this.onPauseAll,
+    required this.onResumeAll,
+  });
+
+  final TextEditingController search;
+  final FocusNode searchFocus;
+  final _Filter filter;
+  final TorrentSort sort;
+  final bool canPauseAll;
+  final bool canResumeAll;
+  final ValueChanged<_Filter> onFilter;
+  final ValueChanged<TorrentSort> onSort;
+  final VoidCallback onPauseAll;
+  final VoidCallback onResumeAll;
+
+  static String _sortLabel(TorrentSort sort, AppLocalizations s) =>
+      switch (sort) {
+        TorrentSort.added => s.sortAdded,
+        TorrentSort.name => s.sortName,
+        TorrentSort.progress => s.sortProgress,
+        TorrentSort.size => s.sortSize,
+        TorrentSort.speed => s.sortSpeed,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: 40,
+              child: TextField(
+                controller: search,
+                focusNode: searchFocus,
+                style: theme.textTheme.bodyMedium,
+                textAlignVertical: TextAlignVertical.center,
+                decoration: InputDecoration(
+                  hintText: s.search,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: search.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: s.cancel,
+                          onPressed: search.clear,
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                        ),
+                ),
+                onTapOutside: (_) => searchFocus.unfocus(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          PopupMenuButton<_Filter>(
+            tooltip: filter.label(s),
+            initialValue: filter,
+            onSelected: onFilter,
+            itemBuilder: (_) => [
+              for (final f in _Filter.values)
+                CheckedPopupMenuItem(
+                  value: f,
+                  checked: f == filter,
+                  child: Text(f.label(s)),
+                ),
+            ],
+            icon: Icon(
+              Icons.filter_list_rounded,
+              color: filter == _Filter.all ? null : scheme.primary,
+            ),
+          ),
+          PopupMenuButton<TorrentSort>(
+            tooltip: s.sortBy,
+            initialValue: sort,
+            onSelected: onSort,
+            itemBuilder: (_) => [
+              for (final option in TorrentSort.values)
+                CheckedPopupMenuItem(
+                  value: option,
+                  checked: option == sort,
+                  child: Text(_sortLabel(option, s)),
+                ),
+            ],
+            icon: const Icon(Icons.sort_rounded),
+          ),
+          IconButton(
+            tooltip: s.pauseAll,
+            onPressed: canPauseAll ? onPauseAll : null,
+            icon: const Icon(Icons.pause_circle_outline_rounded),
+          ),
+          IconButton(
+            tooltip: s.resumeAll,
+            onPressed: canResumeAll ? onResumeAll : null,
+            icon: const Icon(Icons.play_circle_outline_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NothingFound extends StatelessWidget {
+  const _NothingFound();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: _Dock.reserved),
+      child: Center(
+        child: Text(
+          AppLocalizations.of(context).nothingFound,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// The floating bar at the bottom with every control of the application:
