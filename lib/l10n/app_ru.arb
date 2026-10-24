@@ -105,6 +105,7 @@
   "updateAvailable": "Вышел NoodleT {version}",
   "updateDownload": "Скачать",
   "updateCheckNow": "Проверить сейчас",
+  "updateTag": "{version} доступна",
   "updateChecking": "Проверка…",
   "updateUpToDate": "Установлена последняя версия",
   "updateFailed": "Не удалось проверить: нет связи с GitHub",

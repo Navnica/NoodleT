@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -397,6 +398,7 @@ class _HomePageState extends State<HomePage> {
           onPaste: _paste,
           onOpenFiles: _openFiles,
           onSettings: _openSettings,
+          update: _controller.availableUpdate,
         ),
         Expanded(
           child: Row(
@@ -654,6 +656,7 @@ class _TopBar extends StatelessWidget {
     required this.onPaste,
     required this.onOpenFiles,
     required this.onSettings,
+    required this.update,
   });
 
   final TextEditingController input;
@@ -663,6 +666,9 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onPaste;
   final VoidCallback onOpenFiles;
   final VoidCallback onSettings;
+
+  /// A newer release, shown as a tag before the settings once there is one.
+  final ValueListenable<String?> update;
 
   @override
   Widget build(BuildContext context) {
@@ -735,6 +741,15 @@ class _TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           _Speed(downloadRate: downloadRate, uploadRate: uploadRate),
+          ValueListenableBuilder(
+            valueListenable: update,
+            builder: (context, version, _) => version == null
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: UpdateTag(version: version),
+                  ),
+          ),
           const SizedBox(width: 2),
           IconButton(
             tooltip: s.settings,
@@ -743,6 +758,52 @@ class _TopBar extends StatelessWidget {
             icon: const Icon(Icons.settings_rounded),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// "1.6.0 available": a small tag that opens the download page.
+class UpdateTag extends StatelessWidget {
+  const UpdateTag({super.key, required this.version});
+
+  final String version;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Tooltip(
+      message: '${s.updateAvailable(version)} — ${s.updateDownload}',
+      child: Material(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => openUrl(Updates.releasePage),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.arrow_circle_down_rounded,
+                  size: 16,
+                  color: scheme.onPrimaryContainer,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  s.updateTag(version),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.onPrimaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

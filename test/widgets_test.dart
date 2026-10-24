@@ -9,6 +9,7 @@ import 'package:noodlet/l10n/app_localizations.dart';
 import 'package:noodlet/settings.dart';
 import 'package:noodlet/ui/details_panel.dart';
 import 'package:noodlet/ui/dialogs.dart';
+import 'package:noodlet/ui/home_page.dart';
 import 'package:noodlet/ui/theme.dart';
 import 'package:noodlet/version.dart';
 import 'package:noodlet/ui/torrent_row.dart';
@@ -345,6 +346,7 @@ void main() {
   _themeTest();
   _proxyTest();
   _updateTest();
+  _updateTagTest();
 }
 
 void _themeTest() {
@@ -542,6 +544,18 @@ void _updateTest() {
     expect(find.text(_en.updateCheckNow), findsOne);
     expect(find.text(_en.updateFound('99.0.0')), findsOne);
     expect(find.text(_en.updateDownload), findsOne);
+  });
+}
+
+void _updateTagTest() {
+  testWidgets('a newer release shows as a tag', (tester) async {
+    await tester.pumpWidget(_app(const UpdateTag(version: '1.6.0')));
+    expect(tester.takeException(), isNull);
+    expect(find.text(_en.updateTag('1.6.0')), findsOne);
+    expect(
+      find.byTooltip('${_en.updateAvailable('1.6.0')} — ${_en.updateDownload}'),
+      findsOne,
+    );
   });
 }
 

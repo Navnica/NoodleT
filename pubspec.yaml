@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # The installer and the release take the version from here; lib/version.dart
 # repeats it for the code (test/version_test.dart keeps the two equal).
-version: 1.5.0+8
+version: 1.5.1+9
 
 environment:
   sdk: ^3.13.5

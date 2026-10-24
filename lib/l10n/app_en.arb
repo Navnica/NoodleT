@@ -271,6 +271,15 @@
   },
   "updateDownload": "Download",
   "updateCheckNow": "Check now",
+  "updateTag": "{version} available",
+  "@updateTag": {
+    "description": "A small tag next to the settings button when a newer release is out.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "updateChecking": "Checking…",
   "updateUpToDate": "This is the latest version",
   "updateFailed": "Could not check: GitHub is unreachable",
