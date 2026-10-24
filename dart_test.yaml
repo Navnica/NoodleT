@@ -1,0 +1,4 @@
+# Tags of the tests. "proxy" marks the checks of a proxy, which CI leaves
+# out (flutter test --exclude-tags proxy).
+tags:
+  proxy:

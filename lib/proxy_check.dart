@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:socks5_proxy/exceptions.dart' as socks;
 import 'package:socks5_proxy/socks_client.dart' as socks;
 
@@ -26,6 +28,9 @@ Future<ProxyCheckResult> checkProxy(
   Uri? target,
   Duration timeout = const Duration(seconds: 15),
   void Function(String detail)? detail,
+  @visibleForTesting
+  Future<List<InternetAddress>> Function(String host) lookup =
+      InternetAddress.lookup,
 }) async {
   if (!proxy.enabled || !proxy.isValid) return ProxyCheckResult.failed;
   final host = proxy.host.trim();
@@ -34,7 +39,11 @@ Future<ProxyCheckResult> checkProxy(
   try {
     switch (proxy.kind) {
       case ProxyKind.socks5:
-        final address = (await InternetAddress.lookup(host)).first;
+        final address = await _reachable(
+          await lookup(host),
+          proxy.port,
+          timeout,
+        );
         socks.SocksTCPClient.assignToHttpClient(client, [
           socks.ProxySettings(
             address,
@@ -62,6 +71,28 @@ Future<ProxyCheckResult> checkProxy(
   } finally {
     client.close(force: true);
   }
+}
+
+/// The first of the [addresses] of a name that takes a connection on
+/// [port]. A name can stand for both an IPv6 and an IPv4 address, and the
+/// proxy may listen on one only: Windows, for one, gives "localhost" as ::1
+/// first.
+Future<InternetAddress> _reachable(
+  List<InternetAddress> addresses,
+  int port,
+  Duration timeout,
+) async {
+  for (final address in addresses) {
+    try {
+      final socket = await Socket.connect(address, port, timeout: timeout);
+      socket.destroy();
+      return address;
+    } on SocketException {
+      // The next one may answer.
+    }
+  }
+  // None did: the check fails on the first, with its error.
+  return addresses.first;
 }
 
 String _describe(Object error) => switch (error) {

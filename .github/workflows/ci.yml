@@ -40,8 +40,9 @@ jobs:
       - name: Analyzer
         run: flutter analyze
 
+      # The proxy tests stay on the developer's machine.
       - name: Tests
-        run: flutter test
+        run: flutter test --exclude-tags proxy
 
       - name: Linux build
         if: runner.os == 'Linux'

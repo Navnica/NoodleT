@@ -1,7 +1,9 @@
 // Checks of a proxy against a local SOCKS5 server. A real one is tried too
 // when NOODLET_TEST_PROXY is set to "socks5://user:password@host:port";
 // without it that test is skipped.
+// Tagged so that CI can leave them out: flutter test --exclude-tags proxy.
 @TestOn('vm')
+@Tags(['proxy'])
 library;
 
 import 'dart:io';
@@ -57,6 +59,22 @@ void main() {
 
     test('works with the right login', () async {
       expect(await checkProxy(proxy(), target: page), ProxyCheckResult.works);
+    });
+
+    // As Windows answers for "localhost": IPv6 first, where nothing
+    // listens here.
+    test('finds the address the proxy listens on', () async {
+      expect(
+        await checkProxy(
+          proxy(),
+          target: page,
+          lookup: (_) async => [
+            InternetAddress.loopbackIPv6,
+            InternetAddress.loopbackIPv4,
+          ],
+        ),
+        ProxyCheckResult.works,
+      );
     });
 
     // This server just hangs up on a wrong login; most others say so,
