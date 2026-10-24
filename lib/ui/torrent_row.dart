@@ -265,25 +265,33 @@ class _StateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: Color.alphaBlend(
-        color.withValues(alpha: 0.09),
-        scheme.surfaceContainerLow,
-      ),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: selected ? color.withValues(alpha: 0.7) : Colors.transparent,
-          width: 1.5,
+    final base = Color.alphaBlend(
+      color.withValues(alpha: 0.09),
+      scheme.surfaceContainerLow,
+    );
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: selected ? 1 : 0),
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+      builder: (context, t, _) => Material(
+        // A little more of the state's colour while chosen.
+        color: Color.lerp(
+          base,
+          Color.alphaBlend(color.withValues(alpha: 0.16), base),
+          t,
         ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        onSecondaryTapUp: onSecondaryTap == null
-            ? null
-            : (details) => onSecondaryTap!(details.globalPosition),
-        child: child,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: color.withValues(alpha: 0.7 * t), width: 1.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          onSecondaryTapUp: onSecondaryTap == null
+              ? null
+              : (details) => onSecondaryTap!(details.globalPosition),
+          child: child,
+        ),
       ),
     );
   }

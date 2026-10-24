@@ -60,6 +60,13 @@ class _HomePageState extends State<HomePage> {
   /// The torrent whose details are open next to the list.
   String? _selected;
 
+  /// The last torrent whose details were open: the panel keeps showing it
+  /// while it slides away.
+  String? _shownDetails;
+
+  static const _panelWidth = 420.0;
+  static const _panelSlide = Duration(milliseconds: 240);
+
   AppController get _controller => widget.controller;
 
   @override
@@ -388,6 +395,8 @@ class _HomePageState extends State<HomePage> {
     final torrents = _controller.torrents;
     final shown = _shown(torrents);
     final selected = _selected;
+    if (selected != null) _shownDetails = selected;
+    final panelId = _shownDetails;
     return Column(
       children: [
         _TopBar(
@@ -432,25 +441,67 @@ class _HomePageState extends State<HomePage> {
                         ],
                       ),
               ),
-              if (selected != null) ...[
-                const VerticalDivider(width: 1),
-                SizedBox(
-                  width: 420,
-                  child: ColoredBox(
-                    color: Theme.of(context).colorScheme.surfaceContainerLow,
-                    child: DetailsPanel(
-                      key: ValueKey(selected),
-                      controller: _controller,
-                      id: selected,
-                      onOpenFolder: _openFolder,
-                      onRemove: _remove,
-                      onClose: () {
-                        if (mounted) setState(() => _selected = null);
-                      },
-                    ),
-                  ),
-                ),
-              ],
+              // Slides in from the right edge and out again; the list
+              // narrows and widens along.
+              AnimatedContainer(
+                duration: _panelSlide,
+                curve: Curves.easeOutCubic,
+                width: selected == null ? 0 : _panelWidth + 1,
+                clipBehavior: Clip.hardEdge,
+                decoration: const BoxDecoration(),
+                onEnd: () {
+                  if (_selected == null && _shownDetails != null) {
+                    setState(() => _shownDetails = null);
+                  }
+                },
+                child: panelId == null
+                    ? null
+                    : OverflowBox(
+                        alignment: Alignment.centerLeft,
+                        minWidth: _panelWidth + 1,
+                        maxWidth: _panelWidth + 1,
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const VerticalDivider(width: 1),
+                            Expanded(
+                              child: ColoredBox(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .surfaceContainerLow,
+                                // Another torrent fades in over the last.
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 180),
+                                  transitionBuilder: (child, animation) =>
+                                      FadeTransition(
+                                        opacity: animation,
+                                        child: SlideTransition(
+                                          position: Tween(
+                                            begin: const Offset(0.03, 0),
+                                            end: Offset.zero,
+                                          ).animate(animation),
+                                          child: child,
+                                        ),
+                                      ),
+                                  child: DetailsPanel(
+                                    key: ValueKey(panelId),
+                                    controller: _controller,
+                                    id: panelId,
+                                    onOpenFolder: _openFolder,
+                                    onRemove: _remove,
+                                    onClose: () {
+                                      if (mounted) {
+                                        setState(() => _selected = null);
+                                      }
+                                    },
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
             ],
           ),
         ),
