@@ -655,7 +655,7 @@ class _TopBar extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return Container(
-      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
       decoration: BoxDecoration(
         // The page's own colour, so that the field stands out as the
         // search field below does.
@@ -667,21 +667,28 @@ class _TopBar extends StatelessWidget {
           IconButton(
             tooltip: s.openFile,
             onPressed: onOpenFiles,
+            iconSize: 20,
             icon: const Icon(Icons.attach_file_rounded),
           ),
           const SizedBox(width: 4),
           Expanded(
-            child: SizedBox(
-              height: 40,
-              child: TextField(
-                controller: input,
-                onSubmitted: onSubmit,
-                style: theme.textTheme.bodyMedium,
-                textAlignVertical: TextAlignVertical.center,
-                decoration: InputDecoration(
-                  hintText: s.inputHint,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            // As tall as the add button next to it: the padding gives the
+            // height, so that the row centres the field with the buttons.
+            child: TextField(
+              controller: input,
+              onSubmitted: onSubmit,
+              style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+              decoration: InputDecoration(
+                hintText: s.inputHint,
+                isDense: true,
+                prefixIcon: const Icon(Icons.link_rounded, size: 18),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 36,
+                  minHeight: 36,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 7.5,
                 ),
               ),
             ),
@@ -696,19 +703,28 @@ class _TopBar extends StatelessWidget {
               return IconButton.filled(
                 tooltip: empty ? '${s.add} (Ctrl+V)' : s.add,
                 onPressed: empty ? onPaste : () => onSubmit(value.text),
+                style: IconButton.styleFrom(
+                  fixedSize: const Size(36, 36),
+                  minimumSize: const Size(36, 36),
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
                 icon: Icon(
                   empty ? Icons.content_paste_rounded : Icons.add_rounded,
-                  size: 20,
+                  size: 18,
                 ),
               );
             },
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           _Speed(downloadRate: downloadRate, uploadRate: uploadRate),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           IconButton(
             tooltip: s.settings,
             onPressed: onSettings,
+            iconSize: 20,
             icon: const Icon(Icons.settings_rounded),
           ),
         ],
@@ -748,14 +764,16 @@ class _Speed extends StatelessWidget {
     final scheme = theme.colorScheme;
     final style = theme.textTheme.labelSmall?.copyWith(
       fontFeatures: const [FontFeature.tabularFigures()],
-      height: 1.25,
+      fontSize: 10.5,
+      height: 1.2,
     );
     return Container(
-      constraints: const BoxConstraints(minWidth: 88),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      constraints: const BoxConstraints(minWidth: 80, minHeight: 36),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      alignment: Alignment.centerLeft,
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

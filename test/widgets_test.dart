@@ -279,6 +279,10 @@ void main() {
   ) async {
     final dir = Directory.systemTemp.createTempSync('noodlet_lang');
     addTearDown(() => dir.deleteSync(recursive: true));
+    // A desktop window, so that the whole dialog fits.
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     final controller = AppController(
       engine: TorrentEngine(),
       store: SettingsStore(dir.path),
@@ -311,10 +315,13 @@ void main() {
 
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    expect(find.text(_ru.language), findsOneWidget);
-    await tester.ensureVisible(find.text('English'));
+    // The language is on the interface tab, in a drop-down list.
+    await tester.tap(find.text(_ru.settingsAppearance));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('English'));
+    expect(find.text(_ru.language), findsOneWidget);
+    await tester.tap(find.text(_ru.languageSystem));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('English').last);
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, _ru.save));
     // Saving writes and renames a file, and a widget test lets file
@@ -335,6 +342,75 @@ void main() {
       File('${dir.path}/settings.json').readAsStringSync(),
     ) as Map<String, dynamic>;
     expect(saved['language'], 'en');
+  });
+
+  _themeTest();
+}
+
+void _themeTest() {
+  testWidgets('the theme chosen in the settings is applied and saved', (
+    tester,
+  ) async {
+    final dir = Directory.systemTemp.createTempSync('noodlet_theme');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = AppController(
+      engine: TorrentEngine(),
+      store: SettingsStore(dir.path),
+    )..settings = AppSettings(downloadDir: dir.path, listenPort: 50000);
+
+    await tester.pumpWidget(
+      _app(
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showSettingsDialog(context, controller),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(_en.settingsAppearance));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    // One tile per colour.
+    for (final accent in AppAccent.values) {
+      expect(find.byTooltip(_en.accentName(accent.name)), findsOne);
+    }
+    await tester.tap(find.text(_en.themeDark));
+    await tester.ensureVisible(find.byTooltip(_en.accentName('red')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip(_en.accentName('red')));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, _en.save));
+    final settingsFile = File('${dir.path}/settings.json');
+    for (var i = 0; i < 20 && !settingsFile.existsSync(); i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+
+    expect(controller.appearance.value, (AppThemeMode.dark, AppAccent.red));
+    final saved =
+        jsonDecode(settingsFile.readAsStringSync()) as Map<String, dynamic>;
+    expect(saved['theme_mode'], 'dark');
+    expect(saved['accent'], 'red');
+  });
+
+  test('every colour builds a light and a dark theme', () {
+    for (final accent in AppAccent.values) {
+      for (final brightness in Brightness.values) {
+        final theme = buildTheme(brightness, accent: accent);
+        expect(theme.colorScheme.brightness, brightness, reason: '$accent');
+      }
+    }
+    // The own colours stay NoodleT's.
+    expect(buildTheme(Brightness.dark).colorScheme.primary, Palette.mint);
   });
 }
 

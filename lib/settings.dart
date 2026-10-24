@@ -21,6 +21,43 @@ enum AppLanguage {
   Locale? get locale => this == system ? null : Locale(name);
 }
 
+/// Light or dark, or whatever the operating system is set to.
+enum AppThemeMode {
+  system,
+  light,
+  dark;
+
+  static AppThemeMode parse(Object? name) =>
+      values.asNameMap()[name] ?? AppThemeMode.system;
+}
+
+/// The colour the theme is built from: NoodleT's own mint, or one of the
+/// primary colours that Flutter has (`Colors.primaries`), in their order.
+enum AppAccent {
+  noodlet,
+  red,
+  pink,
+  purple,
+  deepPurple,
+  indigo,
+  blue,
+  lightBlue,
+  cyan,
+  teal,
+  green,
+  lightGreen,
+  lime,
+  yellow,
+  amber,
+  orange,
+  deepOrange,
+  brown,
+  blueGrey;
+
+  static AppAccent parse(Object? name) =>
+      values.asNameMap()[name] ?? AppAccent.noodlet;
+}
+
 /// The order of the torrent list.
 enum TorrentSort {
   /// Newest first.
@@ -51,6 +88,8 @@ class AppSettings {
     this.language = AppLanguage.system,
     this.sort = TorrentSort.added,
     this.checkUpdates = true,
+    this.themeMode = AppThemeMode.system,
+    this.accent = AppAccent.noodlet,
   });
 
   /// The ports a user may choose; below are the ones that need privileges.
@@ -84,6 +123,9 @@ class AppSettings {
   /// Whether to look for a newer release on GitHub at startup.
   final bool checkUpdates;
 
+  final AppThemeMode themeMode;
+  final AppAccent accent;
+
   AppSettings copyWith({
     String? downloadDir,
     int? listenPort,
@@ -94,6 +136,8 @@ class AppSettings {
     AppLanguage? language,
     TorrentSort? sort,
     bool? checkUpdates,
+    AppThemeMode? themeMode,
+    AppAccent? accent,
   }) => AppSettings(
     downloadDir: downloadDir ?? this.downloadDir,
     listenPort: listenPort ?? this.listenPort,
@@ -104,6 +148,8 @@ class AppSettings {
     language: language ?? this.language,
     sort: sort ?? this.sort,
     checkUpdates: checkUpdates ?? this.checkUpdates,
+    themeMode: themeMode ?? this.themeMode,
+    accent: accent ?? this.accent,
   );
 
   Map<String, dynamic> toJson() => {
@@ -116,6 +162,8 @@ class AppSettings {
     'language': language.name,
     'sort': sort.name,
     'check_updates': checkUpdates,
+    'theme_mode': themeMode.name,
+    'accent': accent.name,
   };
 }
 
@@ -167,6 +215,8 @@ class SettingsStore {
       language: AppLanguage.parse(json['language']),
       sort: TorrentSort.parse(json['sort']),
       checkUpdates: json['check_updates'] != false,
+      themeMode: AppThemeMode.parse(json['theme_mode']),
+      accent: AppAccent.parse(json['accent']),
     );
     if (json.isEmpty) await save(settings);
     return settings;

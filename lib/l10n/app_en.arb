@@ -259,21 +259,6 @@
       }
     }
   },
-  "listenPort": "Port for incoming connections",
-  "portHint": "{min}–{max}",
-  "@portHint": {
-    "placeholders": {
-      "min": {
-        "type": "int"
-      },
-      "max": {
-        "type": "int"
-      }
-    }
-  },
-  "portOpen": "Open: peers connect from outside",
-  "portUnknown": "No incoming connections yet. If it stays so, forward this port on the router",
-  "portClosed": "The port could not be opened",
   "checkUpdates": "Check for updates",
   "checkUpdatesHint": "At startup, on the NoodleT page on GitHub",
   "updateAvailable": "NoodleT {version} is out",
@@ -287,8 +272,22 @@
   "updateDownload": "Download",
   "hideDetails": "Close",
   "settingsDownloads": "Downloads",
-  "settingsSpeed": "Speed",
-  "settingsConnection": "Network",
+  "settingsSpeed": "Speed limits",
   "settingsInterface": "Application",
-  "limitsHint": "Empty means no limit"
+  "limitsHint": "Empty means no limit",
+  "settingsAppearance": "Interface",
+  "themeMode": "Theme",
+  "themeSystem": "System",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "accentLabel": "Colour",
+  "accentName": "{name, select, noodlet{Mint} red{Red} pink{Pink} purple{Purple} deepPurple{Deep purple} indigo{Indigo} blue{Blue} lightBlue{Light blue} cyan{Cyan} teal{Teal} green{Green} lightGreen{Light green} lime{Lime} yellow{Yellow} amber{Amber} orange{Orange} deepOrange{Deep orange} brown{Brown} blueGrey{Blue grey} other{{name}}}",
+  "@accentName": {
+    "description": "The name of a theme colour; name is AppAccent's name.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../engine/engine.dart';
+import '../settings.dart';
 
 /// Ink and menthol: deep blue-black surfaces with a cool mint accent.
 abstract final class Palette {
@@ -66,8 +67,32 @@ const _light = ColorScheme(
   onInverseSurface: Palette.paper,
 );
 
-ThemeData buildTheme(Brightness brightness) {
-  final scheme = brightness == Brightness.dark ? _dark : _light;
+/// The colour a theme of [accent] grows from.
+Color accentColor(AppAccent accent) => switch (accent) {
+  AppAccent.noodlet => Palette.mint,
+  _ => Colors.primaries[accent.index - 1],
+};
+
+extension AppThemeModeMode on AppThemeMode {
+  ThemeMode get mode => switch (this) {
+    AppThemeMode.system => ThemeMode.system,
+    AppThemeMode.light => ThemeMode.light,
+    AppThemeMode.dark => ThemeMode.dark,
+  };
+}
+
+/// NoodleT's own colours for [AppAccent.noodlet], otherwise Flutter's
+/// scheme grown from the colour.
+ThemeData buildTheme(
+  Brightness brightness, {
+  AppAccent accent = AppAccent.noodlet,
+}) {
+  final scheme = accent == AppAccent.noodlet
+      ? (brightness == Brightness.dark ? _dark : _light)
+      : ColorScheme.fromSeed(
+          seedColor: accentColor(accent),
+          brightness: brightness,
+        );
   final base = ThemeData(colorScheme: scheme, useMaterial3: true);
   return base.copyWith(
     scaffoldBackgroundColor: scheme.surface,

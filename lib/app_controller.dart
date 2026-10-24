@@ -24,6 +24,10 @@ class AppController extends ChangeNotifier {
   /// The language of the interface; the application rebuilds when it changes.
   final language = ValueNotifier(AppLanguage.system);
 
+  /// Light or dark and the colour of the theme; the application rebuilds
+  /// when they change.
+  final appearance = ValueNotifier((AppThemeMode.system, AppAccent.noodlet));
+
   /// Things to tell the user, shown as snack bars.
   Stream<Notice> get notices => _notices.stream;
   final _notices = StreamController<Notice>.broadcast();
@@ -44,6 +48,7 @@ class AppController extends ChangeNotifier {
   Future<void> start() async {
     settings = await store.load();
     language.value = settings.language;
+    appearance.value = (settings.themeMode, settings.accent);
     engine.start(
       stateDir: store.dataDir,
       listenPort: settings.listenPort,
@@ -222,6 +227,7 @@ class AppController extends ChangeNotifier {
     final sortChanged = next.sort != settings.sort;
     settings = next;
     language.value = next.language;
+    appearance.value = (next.themeMode, next.accent);
     _guard(() {
       engine.setRateLimits(
         next.downloadLimitKb * 1024,
@@ -236,13 +242,6 @@ class AppController extends ChangeNotifier {
     await store.save(next);
     notifyListeners();
   }
-
-  /// The port peers reach NoodleT on, 0 when none could be opened.
-  int get listenPort => _running ? engine.listenPort : 0;
-
-  /// Whether a peer has connected from outside since the start, which shows
-  /// that the port is open.
-  bool get hasIncomingConnections => _running && engine.hasIncomingConnections;
 
   /// Starts the torrent [id] that waited on [fileChoices], with only the
   /// files [wanted], downloading into [savePath].

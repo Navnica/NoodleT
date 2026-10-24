@@ -16,6 +16,8 @@ Future<void> main(List<String> args) async {
   await windowManager.ensureInitialized();
   // Room for the list and the details panel next to it.
   await windowManager.setMinimumSize(const Size(720, 480));
+  // The window is still hidden here and shows with its first frame.
+  await windowManager.center();
 
   AppController? controller;
   Tray? tray;
@@ -38,19 +40,24 @@ Future<void> main(List<String> args) async {
     await tray.start();
   }
 
+  final language = controller?.language ?? ValueNotifier(AppLanguage.system);
+  final appearance =
+      controller?.appearance ??
+      ValueNotifier((AppThemeMode.system, AppAccent.noodlet));
   runApp(
-    // The language chosen in the settings; without one, the system's.
-    ValueListenableBuilder(
-      valueListenable:
-          controller?.language ?? ValueNotifier(AppLanguage.system),
-      builder: (context, language, _) => MaterialApp(
+    // The language and the theme chosen in the settings; without them, the
+    // system's.
+    ListenableBuilder(
+      listenable: Listenable.merge([language, appearance]),
+      builder: (context, _) => MaterialApp(
         title: 'NoodleT',
-        locale: language.locale,
+        locale: language.value.locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         debugShowCheckedModeBanner: false,
-        theme: buildTheme(Brightness.light),
-        darkTheme: buildTheme(Brightness.dark),
+        themeMode: appearance.value.$1.mode,
+        theme: buildTheme(Brightness.light, accent: appearance.value.$2),
+        darkTheme: buildTheme(Brightness.dark, accent: appearance.value.$2),
         home: failure == null
             ? HomePage(controller: controller!, initialInputs: args, tray: tray)
             : _FailurePage(details: '$failure'),

@@ -62,7 +62,8 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "NoodleT");
   }
 
-  gtk_window_set_default_size(window, 1000, 680);
+  gtk_window_set_default_size(window, 1100, 740);
+  gtk_window_set_position(window, GTK_WIN_POS_CENTER);
 
   // Connected before the view is realized, so it runs before the view's own
   // handler of the same signal.
