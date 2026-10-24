@@ -1,6 +1,7 @@
-# Checks every push and pull request: formatting, the analyzer and the tests.
-# On Windows, the platform NoodleT is released for: the engine tests drive
-# the real libtorrent build that libtorrent_dart ships for it.
+# Checks every push and pull request: formatting, the analyzer and the tests,
+# on Windows and on Linux, the platforms NoodleT is released for. The engine
+# tests drive the real libtorrent build that libtorrent_dart ships for each.
+# Linux also builds the app, which compiles its runner and the plugins.
 name: CI
 
 on:
@@ -10,9 +11,20 @@ on:
 
 jobs:
   check:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # What flutter build linux needs from the system.
+      - name: Linux build tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
 
       - uses: subosito/flutter-action@v2
         with:
@@ -30,3 +42,7 @@ jobs:
 
       - name: Tests
         run: flutter test
+
+      - name: Linux build
+        if: runner.os == 'Linux'
+        run: flutter build linux --release
