@@ -550,7 +550,7 @@ packages:
     source: hosted
     version: "1.1.1"
   screen_retriever:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: screen_retriever
       sha256: ace919117a7520c13a50a6259e60c4a0d4cbe98809468792a91b5c5adada2aa6
@@ -594,6 +594,14 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  socks5_proxy:
+    dependency: "direct main"
+    description:
+      name: socks5_proxy
+      sha256: a4b95506cbd962fa403e862777432671d36511230c4aedd125a28ddb922e6399
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.2"
   source_span:
     dependency: transitive
     description:

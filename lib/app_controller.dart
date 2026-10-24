@@ -28,6 +28,10 @@ class AppController extends ChangeNotifier {
   /// when they change.
   final appearance = ValueNotifier((AppThemeMode.system, AppAccent.noodlet));
 
+  /// The version of a newer release once one is found. Kept rather than
+  /// sent, so that a window that comes up after the answer still sees it.
+  final availableUpdate = ValueNotifier<String?>(null);
+
   /// Things to tell the user, shown as snack bars.
   Stream<Notice> get notices => _notices.stream;
   final _notices = StreamController<Notice>.broadcast();
@@ -54,18 +58,21 @@ class AppController extends ChangeNotifier {
       listenPort: settings.listenPort,
       downloadLimit: settings.downloadLimitKb * 1024,
       uploadLimit: settings.uploadLimitKb * 1024,
+      proxy: settings.proxy,
     );
     _running = true;
     refresh();
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => refresh());
-    if (settings.checkUpdates) unawaited(_checkUpdates());
+    if (settings.checkUpdates) unawaited(checkUpdates());
   }
 
-  Future<void> _checkUpdates() async {
-    final version = await Updates.newerVersion();
-    if (version != null && _running) {
-      _notices.add(Notice(NoticeKind.update, version));
+  /// Looks for a newer release on GitHub, at startup or when asked to.
+  Future<UpdateCheck> checkUpdates() async {
+    final result = await Updates.check();
+    if (result.status == UpdateStatus.available) {
+      availableUpdate.value = result.version;
     }
+    return result;
   }
 
   void refresh() {
@@ -225,6 +232,7 @@ class AppController extends ChangeNotifier {
   Future<void> updateSettings(AppSettings next) async {
     final portChanged = next.listenPort != settings.listenPort;
     final sortChanged = next.sort != settings.sort;
+    final proxyChanged = next.proxy != settings.proxy;
     settings = next;
     language.value = next.language;
     appearance.value = (next.themeMode, next.accent);
@@ -234,6 +242,7 @@ class AppController extends ChangeNotifier {
         next.uploadLimitKb * 1024,
       );
       if (portChanged) engine.setListenPort(next.listenPort);
+      if (proxyChanged) engine.setProxy(next.proxy);
     });
     if (sortChanged) {
       torrents = List.of(torrents);

@@ -10,19 +10,26 @@ class ThemePalette extends StatelessWidget {
     super.key,
     required this.selected,
     required this.onChanged,
+    this.size = 36,
+    this.spacing = 10,
   });
 
   final AppAccent selected;
   final ValueChanged<AppAccent> onChanged;
 
+  /// The diameter of a swatch, its ring included.
+  final double size;
+  final double spacing;
+
   @override
   Widget build(BuildContext context) => Wrap(
-    spacing: 10,
-    runSpacing: 10,
+    spacing: spacing,
+    runSpacing: spacing,
     children: [
       for (final accent in AppAccent.values)
         _Swatch(
           accent: accent,
+          size: size,
           selected: accent == selected,
           onTap: () => onChanged(accent),
         ),
@@ -33,15 +40,15 @@ class ThemePalette extends StatelessWidget {
 class _Swatch extends StatelessWidget {
   const _Swatch({
     required this.accent,
+    required this.size,
     required this.selected,
     required this.onTap,
   });
 
   final AppAccent accent;
+  final double size;
   final bool selected;
   final VoidCallback onTap;
-
-  static const size = 36.0;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +66,7 @@ class _Swatch extends StatelessWidget {
         child: Container(
           width: size,
           height: size,
-          padding: const EdgeInsets.all(3),
+          padding: EdgeInsets.all(size / 12),
           // A ring around the chosen one.
           decoration: BoxDecoration(
             shape: BoxShape.circle,
@@ -71,7 +78,7 @@ class _Swatch extends StatelessWidget {
           child: DecoratedBox(
             decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             child: selected
-                ? Icon(Icons.check_rounded, size: 18, color: tick)
+                ? Icon(Icons.check_rounded, size: size / 2, color: tick)
                 : null,
           ),
         ),

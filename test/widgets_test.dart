@@ -10,6 +10,7 @@ import 'package:noodlet/settings.dart';
 import 'package:noodlet/ui/details_panel.dart';
 import 'package:noodlet/ui/dialogs.dart';
 import 'package:noodlet/ui/theme.dart';
+import 'package:noodlet/version.dart';
 import 'package:noodlet/ui/torrent_row.dart';
 
 Torrent _torrent(TorrentState state) => Torrent(
@@ -315,13 +316,10 @@ void main() {
 
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    // The language is on the interface tab, in a drop-down list.
-    await tester.tap(find.text(_ru.settingsAppearance));
-    await tester.pumpAndSettle();
     expect(find.text(_ru.language), findsOneWidget);
-    await tester.tap(find.text(_ru.languageSystem));
+    await tester.ensureVisible(find.text('English'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('English').last);
+    await tester.tap(find.text('English'));
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, _ru.save));
     // Saving writes and renames a file, and a widget test lets file
@@ -345,6 +343,8 @@ void main() {
   });
 
   _themeTest();
+  _proxyTest();
+  _updateTest();
 }
 
 void _themeTest() {
@@ -373,13 +373,13 @@ void _themeTest() {
     );
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text(_en.settingsAppearance));
-    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
-    // One tile per colour.
+    // One swatch per colour.
     for (final accent in AppAccent.values) {
       expect(find.byTooltip(_en.accentName(accent.name)), findsOne);
     }
+    await tester.ensureVisible(find.text(_en.themeDark));
+    await tester.pumpAndSettle();
     await tester.tap(find.text(_en.themeDark));
     await tester.ensureVisible(find.byTooltip(_en.accentName('red')));
     await tester.pumpAndSettle();
@@ -411,6 +411,137 @@ void _themeTest() {
     }
     // The own colours stay NoodleT's.
     expect(buildTheme(Brightness.dark).colorScheme.primary, Palette.mint);
+  });
+}
+
+void _proxyTest() {
+  testWidgets('the proxy chosen in the settings is checked and saved', (
+    tester,
+  ) async {
+    final dir = Directory.systemTemp.createTempSync('noodlet_proxy');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = AppController(
+      engine: TorrentEngine(),
+      store: SettingsStore(dir.path),
+    )..settings = AppSettings(downloadDir: dir.path, listenPort: 50000);
+
+    await tester.pumpWidget(
+      _app(
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showSettingsDialog(context, controller),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    FilledButton save() =>
+        tester.widget(find.widgetWithText(FilledButton, _en.save));
+    // Off: nothing to fill in.
+    expect(save().onPressed, isNotNull);
+    expect(find.text(_en.proxySocksHint), findsNothing);
+
+    // Off: no proxy fields either, only the two speed limits.
+    final fields = find.byType(TextField);
+    expect(fields, findsNWidgets(2));
+
+    // On without a server: it cannot be saved.
+    await tester.ensureVisible(find.text('SOCKS5'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SOCKS5'));
+    await tester.pumpAndSettle();
+    expect(fields, findsNWidgets(6));
+    expect(save().onPressed, isNull);
+    expect(find.text(_en.proxyIncomplete), findsOne);
+    expect(find.text(_en.proxySocksHint), findsOne);
+
+    // After the two speed limits.
+    await tester.enterText(fields.at(2), ' proxy.example ');
+    await tester.enterText(fields.at(3), '8080');
+    await tester.enterText(fields.at(4), 'me');
+    await tester.enterText(fields.at(5), 'secret');
+    await tester.pump();
+    expect(save().onPressed, isNotNull);
+    // The password is hidden until asked for.
+    expect(tester.widget<TextField>(fields.at(5)).obscureText, isTrue);
+    await tester.ensureVisible(find.byTooltip(_en.proxyShowPassword));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip(_en.proxyShowPassword));
+    await tester.pump();
+    expect(tester.widget<TextField>(fields.at(5)).obscureText, isFalse);
+
+    await tester.tap(find.widgetWithText(FilledButton, _en.save));
+    final settingsFile = File('${dir.path}/settings.json');
+    for (var i = 0; i < 20 && !settingsFile.existsSync(); i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+
+    expect(
+      controller.settings.proxy,
+      const ProxyConfig(
+        kind: ProxyKind.socks5,
+        host: 'proxy.example',
+        port: 8080,
+        username: 'me',
+        password: 'secret',
+      ),
+    );
+    final saved =
+        jsonDecode(settingsFile.readAsStringSync()) as Map<String, dynamic>;
+    expect(saved['proxy'], {
+      'type': 'socks5',
+      'host': 'proxy.example',
+      'port': 8080,
+      'username': 'me',
+      'password': 'secret',
+    });
+  });
+}
+
+void _updateTest() {
+  testWidgets('the settings end with the version and a check for updates', (
+    tester,
+  ) async {
+    final dir = Directory.systemTemp.createTempSync('noodlet_update');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    tester.view.physicalSize = const Size(1200, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final controller = AppController(
+      engine: TorrentEngine(),
+      store: SettingsStore(dir.path),
+    )..settings = AppSettings(downloadDir: dir.path, listenPort: 50000);
+    // As if the check at startup had found one.
+    controller.availableUpdate.value = '99.0.0';
+
+    await tester.pumpWidget(
+      _app(
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showSettingsDialog(context, controller),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('NoodleT $appVersion'), findsOne);
+    expect(find.text(_en.updateCheckNow), findsOne);
+    expect(find.text(_en.updateFound('99.0.0')), findsOne);
+    expect(find.text(_en.updateDownload), findsOne);
   });
 }
 

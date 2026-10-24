@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_controller.dart';
@@ -17,7 +18,7 @@ Future<void> main(List<String> args) async {
   // Room for the list and the details panel next to it.
   await windowManager.setMinimumSize(const Size(720, 480));
   // The window is still hidden here and shows with its first frame.
-  await windowManager.center();
+  await windowManager.setBounds(await _startBounds());
 
   AppController? controller;
   Tray? tray;
@@ -63,6 +64,30 @@ Future<void> main(List<String> args) async {
             : _FailurePage(details: '$failure'),
       ),
     ),
+  );
+}
+
+/// Most of the screen's work area, within limits, in its middle: room
+/// enough for the settings to show whole on a common monitor. Placed in one
+/// step, since a centring done apart can come before the new size lands.
+Future<Rect> _startBounds() async {
+  var area = const Rect.fromLTWH(0, 0, 1280, 800);
+  try {
+    final display = await screenRetriever.getPrimaryDisplay();
+    final size = display.visibleSize ?? display.size;
+    final origin = display.visiblePosition ?? Offset.zero;
+    area = origin & size;
+  } on Object {
+    // Unknown screen: the guess above.
+  }
+  final size = Size(
+    (area.width * 0.85).clamp(720, 1440),
+    (area.height * 0.9).clamp(480, 1040),
+  );
+  return Rect.fromCenter(
+    center: area.center,
+    width: size.width,
+    height: size.height,
   );
 }
 

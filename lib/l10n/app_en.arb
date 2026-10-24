@@ -270,14 +270,50 @@
     }
   },
   "updateDownload": "Download",
+  "updateCheckNow": "Check now",
+  "updateChecking": "Checking…",
+  "updateUpToDate": "This is the latest version",
+  "updateFailed": "Could not check: GitHub is unreachable",
+  "updateFound": "Version {version} is out",
+  "@updateFound": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "hideDetails": "Close",
   "settingsDownloads": "Downloads",
   "settingsSpeed": "Speed limits",
   "settingsInterface": "Application",
   "limitsHint": "Empty means no limit",
-  "settingsAppearance": "Interface",
+  "settingsAppearance": "Appearance",
+  "settingsNetwork": "Network",
+  "proxyType": "Proxy",
+  "proxyNone": "None",
+  "proxyServer": "Server",
+  "proxyPortHint": "port",
+  "proxyUsername": "Username",
+  "proxyPassword": "Password",
+  "proxyOptional": "Optional",
+  "proxyShowPassword": "Show password",
+  "proxyCheck": "Test",
+  "proxyChecking": "Testing…",
+  "proxyWorks": "The proxy works",
+  "proxyAuthFailed": "Wrong username or password",
+  "proxyFailed": "Could not connect: {reason}",
+  "@proxyFailed": {
+    "description": "reason is the error of the network or the proxy.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "proxyIncomplete": "Enter the server and the port",
+  "proxySocksHint": "All torrent traffic goes through the proxy: peers, trackers and DHT.",
   "themeMode": "Theme",
-  "themeSystem": "System",
+  "themeSystem": "Auto",
   "themeLight": "Light",
   "themeDark": "Dark",
   "accentLabel": "Colour",

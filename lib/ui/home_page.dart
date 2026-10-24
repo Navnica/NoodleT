@@ -86,6 +86,9 @@ class _HomePageState extends State<HomePage> {
       }
     });
     _controller.addListener(_syncTray);
+    // The check may have answered before this window came up.
+    _controller.availableUpdate.addListener(_announceUpdate);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _announceUpdate());
     _search.addListener(() => setState(() {}));
   }
 
@@ -99,6 +102,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _controller.removeListener(_syncTray);
+    _controller.availableUpdate.removeListener(_announceUpdate);
     _instance.setMethodCallHandler(null);
     _notices.cancel();
     _fileChoices.cancel();
@@ -118,7 +122,6 @@ class _HomePageState extends State<HomePage> {
       NoticeKind.trackersAdded => s.trackersAdded(
         int.tryParse(notice.detail) ?? 0,
       ),
-      NoticeKind.update => s.updateAvailable(notice.detail),
       NoticeKind.badMagnet => s.badMagnet,
       NoticeKind.badTorrent => s.badTorrent,
       NoticeKind.unreadable => s.unreadable,
@@ -129,17 +132,29 @@ class _HomePageState extends State<HomePage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
+        SnackBar(content: Text(text), duration: const Duration(seconds: 4)),
+      );
+  }
+
+  /// The version already announced, so that it is told once.
+  String? _announced;
+
+  /// Tells about a newer release, with a button to download it.
+  void _announceUpdate() {
+    final version = _controller.availableUpdate.value;
+    if (!mounted || version == null || version == _announced) return;
+    _announced = version;
+    final s = AppLocalizations.of(context);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
         SnackBar(
-          content: Text(text),
-          action: notice.kind == NoticeKind.update
-              ? SnackBarAction(
-                  label: s.updateDownload,
-                  onPressed: () => openUrl(Updates.releasePage),
-                )
-              : null,
-          duration: notice.kind == NoticeKind.update
-              ? const Duration(seconds: 15)
-              : const Duration(seconds: 4),
+          content: Text(s.updateAvailable(version)),
+          action: SnackBarAction(
+            label: s.updateDownload,
+            onPressed: () => openUrl(Updates.releasePage),
+          ),
+          duration: const Duration(seconds: 15),
         ),
       );
   }

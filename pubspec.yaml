@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # The installer and the release take the version from here; lib/version.dart
 # repeats it for the code (test/version_test.dart keeps the two equal).
-version: 1.4.0+7
+version: 1.5.0+8
 
 environment:
   sdk: ^3.13.5
@@ -25,6 +25,10 @@ dependencies:
   libtorrent_dart: 1.2.0
   tray_manager: ^0.8.0
   window_manager: ^0.5.2
+  socks5_proxy: ^2.1.2
+  # The size of the screen, for the window's first size; window_manager
+  # uses it too.
+  screen_retriever: ^0.2.0
 
 dev_dependencies:
   flutter_test:

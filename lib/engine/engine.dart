@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:libtorrent_dart/libtorrent_dart.dart' as lt;
 import 'package:path/path.dart' as p;
 
+import '../settings.dart';
 import '../version.dart';
 
 enum TorrentState { paused, checking, metadata, downloading, seeding, error }
@@ -180,12 +181,14 @@ class TorrentEngine {
     required int listenPort,
     required int downloadLimit,
     required int uploadLimit,
+    ProxyConfig proxy = const ProxyConfig(),
   }) => _wrap('start_failed', () {
     if (_session == null) {
       _stateDir = stateDir;
       Directory(p.join(stateDir, 'resume')).createSync(recursive: true);
       final session = _createSession();
       _applySettings(session, listenPort, downloadLimit, uploadLimit);
+      _applyProxy(session, proxy);
       _session = session;
       _restore(session);
     }
@@ -596,6 +599,22 @@ class TorrentEngine {
     session.setUploadRateLimit(upload > 0 ? upload : 0);
   });
 
+  /// Sends the torrent traffic through [proxy] from now on, or directly
+  /// when it is off.
+  void setProxy(ProxyConfig proxy) =>
+      _wrap('failed', () => _applyProxy(_running, proxy));
+
+  /// The proxy the session uses, as libtorrent has it; for the tests.
+  ({int type, String host, int port, String username}) get appliedProxy {
+    final s = _running;
+    return (
+      type: s.getIntSetting(lt.LibtorrentSettingsTag.proxyType),
+      host: s.getStringSetting(lt.LibtorrentSettingsTag.proxyHostname),
+      port: s.getIntSetting(lt.LibtorrentSettingsTag.proxyPort),
+      username: s.getStringSetting(lt.LibtorrentSettingsTag.proxyUsername),
+    );
+  }
+
   /// Listens for peers on [port] from now on.
   void setListenPort(int port) =>
       _wrap('failed', () => _listenOn(_running, port));
@@ -715,6 +734,29 @@ class TorrentEngine {
     _listenOn(s, port);
     s.setDownloadRateLimit(download > 0 ? download : 0);
     s.setUploadRateLimit(upload > 0 ? upload : 0);
+  }
+
+  /// Peers, trackers and the DHT go over the proxy: libtorrent's own
+  /// defaults route all three once a SOCKS5 proxy is set.
+  void _applyProxy(lt.Session s, ProxyConfig proxy) {
+    final login = proxy.username.isNotEmpty || proxy.password.isNotEmpty;
+    final type = switch (proxy.kind) {
+      _ when !proxy.isValid => lt.LibtorrentProxyType.none,
+      ProxyKind.none => lt.LibtorrentProxyType.none,
+      ProxyKind.socks5 =>
+        login
+            ? lt.LibtorrentProxyType.socks5Password
+            : lt.LibtorrentProxyType.socks5,
+    };
+    s.setProxy(
+      lt.ProxySetting(
+        hostname: proxy.host.trim(),
+        port: proxy.port,
+        username: proxy.username,
+        password: proxy.password,
+        type: type,
+      ),
+    );
   }
 
   void _listenOn(lt.Session s, int port) =>

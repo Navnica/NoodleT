@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:libtorrent_dart/libtorrent_dart.dart' as lt;
 import 'package:noodlet/engine/engine.dart';
+import 'package:noodlet/settings.dart';
 
 const _hash = '0123456789abcdef0123456789abcdef01234567';
 const _magnet = 'magnet:?xt=urn:btih:$_hash&dn=Test%20%D1%84%D0%B0%D0%B9%D0%BB';
@@ -285,5 +286,38 @@ void main() {
         isA<EngineException>().having((e) => e.code, 'code', 'not_found'),
       ),
     );
+  });
+
+  test('sends the traffic through the proxy chosen, and stops', () {
+    start();
+    expect(engine.appliedProxy.type, lt.LibtorrentProxyType.none);
+
+    engine.setProxy(
+      const ProxyConfig(
+        kind: ProxyKind.socks5,
+        host: ' proxy.example ',
+        port: 8080,
+        username: 'user',
+        password: 'secret',
+      ),
+    );
+    var applied = engine.appliedProxy;
+    expect(applied.type, lt.LibtorrentProxyType.socks5Password);
+    expect(applied.host, 'proxy.example');
+    expect(applied.port, 8080);
+    expect(applied.username, 'user');
+
+    engine.setProxy(
+      const ProxyConfig(kind: ProxyKind.socks5, host: '127.0.0.1', port: 1080),
+    );
+    applied = engine.appliedProxy;
+    expect(applied.type, lt.LibtorrentProxyType.socks5);
+
+    // Without a host it would only cut the torrents off.
+    engine.setProxy(const ProxyConfig(kind: ProxyKind.socks5, port: 1080));
+    expect(engine.appliedProxy.type, lt.LibtorrentProxyType.none);
+
+    engine.setProxy(const ProxyConfig());
+    expect(engine.appliedProxy.type, lt.LibtorrentProxyType.none);
   });
 }

@@ -4,10 +4,14 @@ import 'package:flutter/services.dart';
 
 import '../app_controller.dart';
 import '../engine/engine.dart';
+import '../proxy_check.dart';
 import '../settings.dart';
+import '../updates.dart';
+import '../version.dart';
 import '../l10n/app_localizations.dart';
 import 'file_list.dart';
 import 'format.dart';
+import 'system.dart';
 import 'theme_palette.dart';
 
 /// Returns whether the downloaded files should be deleted too, or null when
@@ -252,19 +256,6 @@ class _FileChoiceDialogState extends State<_FileChoiceDialog> {
   }
 }
 
-/// The tabs of the settings.
-enum _SettingsTab {
-  downloads,
-  interface,
-  app;
-
-  String title(AppLocalizations s) => switch (this) {
-    downloads => s.settingsDownloads,
-    interface => s.settingsAppearance,
-    app => s.settingsInterface,
-  };
-}
-
 class _SettingsDialog extends StatefulWidget {
   const _SettingsDialog({required this.controller});
 
@@ -284,14 +275,71 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   late bool _updates = widget.controller.settings.checkUpdates;
   late AppThemeMode _themeMode = widget.controller.settings.themeMode;
   late AppAccent _accent = widget.controller.settings.accent;
+  late ProxyKind _proxyKind = widget.controller.settings.proxy.kind;
+  late final _proxyHost = TextEditingController(
+    text: widget.controller.settings.proxy.host,
+  );
+  late final _proxyPort = TextEditingController(
+    text: widget.controller.settings.proxy.port > 0
+        ? '${widget.controller.settings.proxy.port}'
+        : '',
+  );
+  late final _proxyUser = TextEditingController(
+    text: widget.controller.settings.proxy.username,
+  );
+  late final _proxyPassword = TextEditingController(
+    text: widget.controller.settings.proxy.password,
+  );
+  bool _showPassword = false;
 
-  _SettingsTab _tab = _SettingsTab.downloads;
+  /// The last check of the proxy: null before one, or while it runs.
+  ({ProxyCheckResult result, String detail})? _check;
+  bool _checking = false;
+
+  ProxyConfig get _proxy => ProxyConfig(
+    kind: _proxyKind,
+    host: _proxyHost.text.trim(),
+    port: int.tryParse(_proxyPort.text) ?? 0,
+    username: _proxyUser.text,
+    password: _proxyPassword.text,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    // The Save button and the check follow what is typed.
+    for (final field in [_proxyHost, _proxyPort, _proxyUser, _proxyPassword]) {
+      field.addListener(() => setState(() => _check = null));
+    }
+  }
+
+  Future<void> _checkProxy() async {
+    setState(() {
+      _checking = true;
+      _check = null;
+    });
+    var detail = '';
+    final result = await checkProxy(_proxy, detail: (text) => detail = text);
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _check = (result: result, detail: detail);
+    });
+  }
+
+  /// Scrolled down to the proxy fields once they open.
+  final _scroll = ScrollController();
 
   static TextEditingController _limitField(int kb) =>
       TextEditingController(text: kb > 0 ? '$kb' : '');
 
   @override
   void dispose() {
+    _scroll.dispose();
+    _proxyHost.dispose();
+    _proxyPort.dispose();
+    _proxyUser.dispose();
+    _proxyPassword.dispose();
     _down.dispose();
     _up.dispose();
     super.dispose();
@@ -310,6 +358,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         checkUpdates: _updates,
         themeMode: _themeMode,
         accent: _accent,
+        proxy: _proxy,
       ),
     );
     navigator.pop();
@@ -319,249 +368,338 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final compact = ButtonStyle(
-      minimumSize: const WidgetStatePropertyAll(Size(96, 36)),
-      padding: const WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 18),
-      ),
-      shape: WidgetStatePropertyAll(
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      ),
-    );
+    final scheme = theme.colorScheme;
+    final proxyOn = _proxyKind != ProxyKind.none;
 
-    return Dialog(
-      insetPadding: const EdgeInsets.all(24),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      clipBehavior: Clip.antiAlias,
-      // The same size on every tab, so that it does not jump.
-      child: SizedBox(
-        width: 720,
-        height: 520,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      s.settings,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+    return AlertDialog(
+      title: Text(s.settings),
+      // Scrolls when the window is too low for all the settings.
+      content: SizedBox(
+        width: 660,
+        // Scrolls by the wheel only: a scroll bar would cover the controls
+        // along the right edge.
+        child: ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
+          child: SingleChildScrollView(
+            controller: _scroll,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _Group(s.settingsDownloads),
+                _Setting(
+                  title: s.downloadFolder,
+                  wide: true,
+                  control: FolderField(
+                    path: _dir,
+                    onChanged: (dir) => setState(() => _dir = dir),
                   ),
-                  IconButton(
-                    tooltip: s.cancel,
-                    iconSize: 18,
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  for (final tab in _SettingsTab.values)
-                    _Tab(
-                      label: tab.title(s),
-                      selected: tab == _tab,
-                      onTap: () => setState(() => _tab = tab),
-                    ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            // Scrolls when the window is too low for all the settings.
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 2),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: switch (_tab) {
-                    _SettingsTab.downloads => _downloads(s, theme),
-                    _SettingsTab.interface => _interface(s),
-                    _SettingsTab.app => _app(s),
-                  },
                 ),
-              ),
-            ),
-            const Divider(height: 1),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  OutlinedButton(
-                    style: compact,
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(s.cancel),
+                _Setting(
+                  title: s.seedAfter,
+                  hint: s.seedAfterHint,
+                  control: Switch(
+                    value: _seed,
+                    onChanged: (value) => setState(() => _seed = value),
                   ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    style: compact,
-                    onPressed: _save,
-                    child: Text(s.save),
+                ),
+                _Group(s.settingsSpeed),
+                _Setting(
+                  title: s.downloadLimit,
+                  hint: s.limitsHint,
+                  control: _limit(_down),
+                ),
+                _Setting(
+                  title: s.uploadLimit,
+                  hint: s.limitsHint,
+                  control: _limit(_up),
+                ),
+                _Group(s.settingsAppearance),
+                _Setting(
+                  title: s.language,
+                  control: SegmentedButton<AppLanguage>(
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment(
+                        value: AppLanguage.system,
+                        label: Text(s.languageSystem),
+                      ),
+                      const ButtonSegment(
+                        value: AppLanguage.ru,
+                        label: Text('Русский'),
+                      ),
+                      const ButtonSegment(
+                        value: AppLanguage.en,
+                        label: Text('English'),
+                      ),
+                    ],
+                    selected: {_language},
+                    onSelectionChanged: (choice) =>
+                        setState(() => _language = choice.single),
                   ),
-                ],
-              ),
+                ),
+                _Setting(
+                  title: s.themeMode,
+                  control: SegmentedButton<AppThemeMode>(
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment(
+                        value: AppThemeMode.system,
+                        label: Text(s.themeSystem),
+                      ),
+                      ButtonSegment(
+                        value: AppThemeMode.light,
+                        label: Text(s.themeLight),
+                      ),
+                      ButtonSegment(
+                        value: AppThemeMode.dark,
+                        label: Text(s.themeDark),
+                      ),
+                    ],
+                    selected: {_themeMode},
+                    onSelectionChanged: (choice) =>
+                        setState(() => _themeMode = choice.single),
+                  ),
+                ),
+                _Setting(
+                  title: s.accentLabel,
+                  wide: true,
+                  // All of them on one line.
+                  control: ThemePalette(
+                    selected: _accent,
+                    size: 24,
+                    spacing: 6,
+                    onChanged: (accent) => setState(() => _accent = accent),
+                  ),
+                ),
+                _Group(s.settingsInterface),
+                _Setting(
+                  title: s.closeToTray,
+                  hint: s.closeToTrayHint,
+                  control: Switch(
+                    value: _tray,
+                    onChanged: (value) => setState(() => _tray = value),
+                  ),
+                ),
+                _Setting(
+                  title: s.checkUpdates,
+                  hint: s.checkUpdatesHint,
+                  control: Switch(
+                    value: _updates,
+                    onChanged: (value) => setState(() => _updates = value),
+                  ),
+                ),
+                _UpdateCheck(controller: widget.controller),
+                _Group(s.settingsNetwork),
+                _Setting(
+                  title: s.proxyType,
+                  hint: switch (_proxyKind) {
+                    ProxyKind.none => null,
+                    ProxyKind.socks5 => s.proxySocksHint,
+                  },
+                  control: SegmentedButton<ProxyKind>(
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment(
+                        value: ProxyKind.none,
+                        label: Text(s.proxyNone),
+                      ),
+                      const ButtonSegment(
+                        value: ProxyKind.socks5,
+                        label: Text('SOCKS5'),
+                      ),
+                    ],
+                    selected: {_proxyKind},
+                    onSelectionChanged: (choice) =>
+                        _setProxyKind(choice.single),
+                  ),
+                ),
+                // The fields of the proxy only while one is chosen.
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 180),
+                  alignment: Alignment.topCenter,
+                  child: proxyOn
+                      ? _proxyFields(s, theme, scheme)
+                      : const SizedBox(width: double.infinity),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 24, bottom: 4),
+                  child: Text(
+                    'NoodleT $appVersion',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(s.cancel),
+        ),
+        // A proxy without a server cannot be saved.
+        FilledButton(
+          onPressed: _proxy.isValid ? _save : null,
+          child: Text(s.save),
+        ),
+      ],
     );
   }
 
-  /// Where the downloads go, whether they seed, and how fast they may be.
-  List<Widget> _downloads(AppLocalizations s, ThemeData theme) => [
-    _Section(
-      children: [
-        _FormRow(
-          label: s.downloadFolder,
-          child: FolderField(
-            path: _dir,
-            onChanged: (dir) => setState(() => _dir = dir),
-          ),
-        ),
-        _FormRow(
-          child: _Check(
-            value: _seed,
-            title: s.seedAfter,
-            hint: s.seedAfterHint,
-            onChanged: (value) => setState(() => _seed = value),
-          ),
-        ),
-      ],
-    ),
-    _Section(
-      title: s.settingsSpeed,
-      children: [
-        _FormRow(label: s.downloadLimit, child: _limit(_down)),
-        _FormRow(label: s.uploadLimit, child: _limit(_up)),
-        _FormRow(
-          child: Text(
-            s.limitsHint,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
-      ],
-    ),
-  ];
+  /// Opens or closes the proxy fields; opened, they are scrolled into view.
+  void _setProxyKind(ProxyKind kind) {
+    final opening = _proxyKind == ProxyKind.none && kind != ProxyKind.none;
+    setState(() {
+      _proxyKind = kind;
+      _check = null;
+    });
+    if (!opening) return;
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (!mounted || !_scroll.hasClients) return;
+      _scroll.animateTo(
+        _scroll.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    });
+  }
 
-  /// What the window looks like: its language, light or dark, its colour.
-  List<Widget> _interface(AppLocalizations s) => [
-    _Section(
-      children: [
-        _FormRow(
-          label: s.language,
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: SizedBox(
-              width: 200,
-              child: DropdownButtonFormField<AppLanguage>(
-                initialValue: _language,
-                isDense: true,
-                borderRadius: BorderRadius.circular(8),
-                items: [
-                  DropdownMenuItem(
-                    value: AppLanguage.system,
-                    child: Text(s.languageSystem),
-                  ),
-                  const DropdownMenuItem(
-                    value: AppLanguage.ru,
-                    child: Text('Русский'),
-                  ),
-                  const DropdownMenuItem(
-                    value: AppLanguage.en,
-                    child: Text('English'),
-                  ),
-                ],
-                onChanged: (value) =>
-                    setState(() => _language = value ?? _language),
+  Widget _proxyFields(AppLocalizations s, ThemeData theme, ColorScheme scheme) {
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    Widget field(
+      TextEditingController controller, {
+      String? hint,
+      bool digits = false,
+      bool secret = false,
+    }) => TextField(
+      controller: controller,
+      obscureText: secret && !_showPassword,
+      keyboardType: digits ? TextInputType.number : null,
+      inputFormatters: digits
+          ? [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(5),
+            ]
+          : null,
+      decoration: InputDecoration(
+        hintText: hint,
+        suffixIcon: secret
+            ? IconButton(
+                tooltip: s.proxyShowPassword,
+                iconSize: 18,
+                onPressed: () => setState(() => _showPassword = !_showPassword),
+                icon: Icon(
+                  _showPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
+              )
+            : null,
+      ),
+    );
+
+    final check = _check;
+    final works = check?.result == ProxyCheckResult.works;
+    final status = !_proxy.isValid
+        ? Text(s.proxyIncomplete, style: muted?.copyWith(color: scheme.error))
+        : _checking
+        ? Row(
+            children: [
+              const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-            ),
-          ),
-        ),
-        _FormRow(
-          label: s.themeMode,
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: SegmentedButton<AppThemeMode>(
-              showSelectedIcon: false,
-              style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: [
-                ButtonSegment(
-                  value: AppThemeMode.system,
-                  icon: const Icon(Icons.brightness_auto_outlined, size: 18),
-                  label: Text(s.themeSystem),
+              const SizedBox(width: 8),
+              Text(s.proxyChecking, style: muted),
+            ],
+          )
+        : check == null
+        ? const SizedBox.shrink()
+        : Row(
+            children: [
+              Icon(
+                works ? Icons.check_circle_rounded : Icons.error_rounded,
+                size: 16,
+                color: works ? scheme.primary : scheme.error,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  switch (check.result) {
+                    ProxyCheckResult.works => s.proxyWorks,
+                    ProxyCheckResult.authFailed => s.proxyAuthFailed,
+                    ProxyCheckResult.failed => s.proxyFailed(check.detail),
+                  },
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: muted?.copyWith(
+                    color: works ? scheme.primary : scheme.error,
+                  ),
                 ),
-                ButtonSegment(
-                  value: AppThemeMode.light,
-                  icon: const Icon(Icons.light_mode_outlined, size: 18),
-                  label: Text(s.themeLight),
-                ),
-                ButtonSegment(
-                  value: AppThemeMode.dark,
-                  icon: const Icon(Icons.dark_mode_outlined, size: 18),
-                  label: Text(s.themeDark),
-                ),
-              ],
-              selected: {_themeMode},
-              onSelectionChanged: (choice) =>
-                  setState(() => _themeMode = choice.single),
-            ),
-          ),
-        ),
-        _FormRow(
-          label: s.accentLabel,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: ThemePalette(
-              selected: _accent,
-              onChanged: (accent) => setState(() => _accent = accent),
-            ),
-          ),
-        ),
-      ],
-    ),
-  ];
+              ),
+            ],
+          );
 
-  /// How NoodleT behaves around the window: the tray and the updates.
-  List<Widget> _app(AppLocalizations s) => [
-    _Section(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // No labels here, so no column for them either.
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: _Check(
-            value: _tray,
-            title: s.closeToTray,
-            hint: s.closeToTrayHint,
-            onChanged: (value) => setState(() => _tray = value),
+        _Setting(
+          title: s.proxyServer,
+          wide: true,
+          control: Row(
+            children: [
+              Expanded(child: field(_proxyHost, hint: 'proxy.example.com')),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 96,
+                child: field(_proxyPort, hint: s.proxyPortHint, digits: true),
+              ),
+            ],
+          ),
+        ),
+        _Setting(
+          title: s.proxyUsername,
+          control: SizedBox(
+            width: 260,
+            child: field(_proxyUser, hint: s.proxyOptional),
+          ),
+        ),
+        _Setting(
+          title: s.proxyPassword,
+          control: SizedBox(
+            width: 260,
+            child: field(_proxyPassword, hint: s.proxyOptional, secret: true),
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: _Check(
-            value: _updates,
-            title: s.checkUpdates,
-            hint: s.checkUpdatesHint,
-            onChanged: (value) => setState(() => _updates = value),
+          child: Row(
+            children: [
+              OutlinedButton(
+                onPressed: _proxy.isValid && !_checking ? _checkProxy : null,
+                child: Text(s.proxyCheck),
+              ),
+              const SizedBox(width: 12),
+              Expanded(child: status),
+            ],
           ),
         ),
       ],
-    ),
-  ];
+    );
+  }
 
   /// A speed limit in KB/s, the unit after the field.
   Widget _limit(TextEditingController field) {
     final s = AppLocalizations.of(context);
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
           width: 120,
@@ -573,13 +711,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               FilteringTextInputFormatter.digitsOnly,
               LengthLimitingTextInputFormatter(7),
             ],
-            decoration: InputDecoration(
-              hintText: s.limitHint,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-            ),
+            decoration: InputDecoration(hintText: s.limitHint),
           ),
         ),
         const SizedBox(width: 8),
@@ -589,173 +721,183 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   }
 }
 
-/// A tab of the settings, underlined while open.
-class _Tab extends StatelessWidget {
-  const _Tab({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
+/// A button that looks for a newer release now, and what it found.
+class _UpdateCheck extends StatefulWidget {
+  const _UpdateCheck({required this.controller});
 
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
+  final AppController controller;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        height: 38,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: selected ? scheme.primary : Colors.transparent,
-              width: 2,
-            ),
-          ),
-        ),
-        child: Text(
-          label,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: selected ? scheme.onSurface : scheme.onSurfaceVariant,
-            fontWeight: selected ? FontWeight.w600 : null,
-          ),
-        ),
-      ),
-    );
-  }
+  State<_UpdateCheck> createState() => _UpdateCheckState();
 }
 
-/// A titled frame around a few settings that belong together.
-class _Section extends StatelessWidget {
-  const _Section({required this.children, this.title});
+class _UpdateCheckState extends State<_UpdateCheck> {
+  bool _checking = false;
 
-  final String? title;
-  final List<Widget> children;
+  /// Null before a check here; a release found at startup shows anyway.
+  UpdateCheck? _result;
+
+  Future<void> _check() async {
+    setState(() => _checking = true);
+    final result = await widget.controller.checkUpdates();
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _result = result;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (title case final title?)
-            Padding(
-              padding: const EdgeInsets.only(left: 2, bottom: 6),
-              child: Text(
-                title,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    final found = widget.controller.availableUpdate.value;
+    final result =
+        _result ??
+        (found == null
+            ? null
+            : (status: UpdateStatus.available, version: found));
+
+    Widget line(IconData icon, Color color, String text) => Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(text, style: muted?.copyWith(color: color)),
+        ),
+      ],
+    );
+
+    final status = _checking
+        ? Row(
+            children: [
+              const SizedBox.square(
+                dimension: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
+              const SizedBox(width: 8),
+              Text(s.updateChecking, style: muted),
+            ],
+          )
+        : switch (result?.status) {
+            null => const SizedBox.shrink(),
+            UpdateStatus.upToDate => line(
+              Icons.check_circle_rounded,
+              scheme.primary,
+              s.updateUpToDate,
             ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 4, 14, 4),
-            // A frame only: the fields inside keep their own fill.
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: scheme.outlineVariant),
+            UpdateStatus.failed => line(
+              Icons.error_rounded,
+              scheme.error,
+              s.updateFailed,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: children,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A form line: the label in a column of its own, the control after it. A
-/// line without a label lines its control up with the others.
-class _FormRow extends StatelessWidget {
-  const _FormRow({required this.child, this.label});
-
-  final String? label;
-  final Widget child;
-
-  static const _labelWidth = 150.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        children: [
-          SizedBox(
-            width: _labelWidth,
-            child: label == null
-                ? null
-                : Text(label!, style: theme.textTheme.bodyMedium),
-          ),
-          Expanded(child: child),
-        ],
-      ),
-    );
-  }
-}
-
-/// A checkbox with its name and, under it, what it does.
-class _Check extends StatelessWidget {
-  const _Check({
-    required this.value,
-    required this.title,
-    required this.hint,
-    required this.onChanged,
-  });
-
-  final bool value;
-  final String title;
-  final String hint;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      borderRadius: BorderRadius.circular(6),
-      onTap: () => onChanged(!value),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 24,
-            height: 24,
-            child: Checkbox(
-              value: value,
-              onChanged: (v) => onChanged(v ?? false),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            UpdateStatus.available => Row(
               children: [
-                const SizedBox(height: 2),
-                Text(title, style: theme.textTheme.bodyMedium),
-                const SizedBox(height: 2),
-                Text(
-                  hint,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                Flexible(
+                  child: line(
+                    Icons.new_releases_rounded,
+                    scheme.primary,
+                    s.updateFound(result!.version),
                   ),
+                ),
+                const SizedBox(width: 4),
+                TextButton(
+                  onPressed: () => openUrl(Updates.releasePage),
+                  child: Text(s.updateDownload),
                 ),
               ],
             ),
+          };
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          OutlinedButton(
+            onPressed: _checking ? null : _check,
+            child: Text(s.updateCheckNow),
           ),
+          const SizedBox(width: 12),
+          Expanded(child: status),
         ],
       ),
+    );
+  }
+}
+
+/// The heading of a few settings that belong together.
+class _Group extends StatelessWidget {
+  const _Group(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 4),
+      child: Text(
+        title,
+        style: theme.textTheme.labelLarge?.copyWith(
+          color: theme.colorScheme.primary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+/// One setting on a line: what it is on the left, its control on the right,
+/// or under the name when [wide].
+class _Setting extends StatelessWidget {
+  const _Setting({
+    required this.title,
+    required this.control,
+    this.hint,
+    this.wide = false,
+  });
+
+  final String title;
+  final String? hint;
+  final bool wide;
+  final Widget control;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: theme.textTheme.bodyLarge),
+        if (hint case final hint?) ...[
+          const SizedBox(height: 2),
+          Text(
+            hint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: wide
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [text, const SizedBox(height: 8), control],
+            )
+          : Row(
+              children: [
+                Expanded(child: text),
+                const SizedBox(width: 24),
+                control,
+              ],
+            ),
     );
   }
 }

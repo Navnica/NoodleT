@@ -29,47 +29,29 @@ class DetailsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final s = AppLocalizations.of(context);
     final torrent = controller.torrents.where((t) => t.id == id).firstOrNull;
     if (torrent == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => onClose());
       return const SizedBox.shrink();
     }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Align(
-          alignment: Alignment.centerRight,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
-            child: IconButton(
-              tooltip: '${s.hideDetails} (Esc)',
-              onPressed: onClose,
-              icon: const Icon(Icons.close_rounded, size: 20),
-            ),
-          ),
-        ),
-        Expanded(
-          child: TorrentDetails(
-            torrent: torrent,
-            files: controller.files(torrent.id),
-            onToggle: () => controller.toggle(torrent),
-            onOpenFolder: () => onOpenFolder(torrent),
-            onRemove: () => onRemove(torrent),
-            onFilesWanted: (indexes, wanted) =>
-                controller.setFilesWanted(torrent, indexes, wanted: wanted),
-            onSequential: (sequential) =>
-                controller.setSequential(torrent, sequential: sequential),
-            onMove: () async {
-              final folder = await pickFolder(torrent.savePath);
-              if (folder != null) controller.move(torrent, folder);
-            },
-            trackers: () => controller.trackers(torrent),
-            onAddTrackers: (text) => controller.addTrackers(torrent, text),
-            peers: () => controller.peers(torrent),
-          ),
-        ),
-      ],
+    return TorrentDetails(
+      torrent: torrent,
+      onClose: onClose,
+      files: controller.files(torrent.id),
+      onToggle: () => controller.toggle(torrent),
+      onOpenFolder: () => onOpenFolder(torrent),
+      onRemove: () => onRemove(torrent),
+      onFilesWanted: (indexes, wanted) =>
+          controller.setFilesWanted(torrent, indexes, wanted: wanted),
+      onSequential: (sequential) =>
+          controller.setSequential(torrent, sequential: sequential),
+      onMove: () async {
+        final folder = await pickFolder(torrent.savePath);
+        if (folder != null) controller.move(torrent, folder);
+      },
+      trackers: () => controller.trackers(torrent),
+      onAddTrackers: (text) => controller.addTrackers(torrent, text),
+      peers: () => controller.peers(torrent),
     );
   }
 }
@@ -82,6 +64,7 @@ class TorrentDetails extends StatelessWidget {
     required this.onToggle,
     required this.onOpenFolder,
     required this.onRemove,
+    this.onClose,
     this.files = const [],
     this.onFilesWanted,
     this.onSequential,
@@ -95,6 +78,9 @@ class TorrentDetails extends StatelessWidget {
   final VoidCallback onToggle;
   final VoidCallback onOpenFolder;
   final VoidCallback onRemove;
+
+  /// Closes the panel; no button without it.
+  final VoidCallback? onClose;
 
   /// Listed with a checkbox each when there are several.
   final List<TorrentFile> files;
@@ -133,8 +119,54 @@ class TorrentDetails extends StatelessWidget {
       ('${s.peersLabel} / ${s.seedsLabel}', '${t.peers} / ${t.seeds}'),
     ];
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+    // The actions stay at the top while the rest scrolls under them.
+    final bar = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+      child: Row(
+        children: [
+          FilledButton.tonalIcon(
+            onPressed: onToggle,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
+            icon: Icon(
+              resumable ? Icons.play_arrow_rounded : Icons.pause_rounded,
+              size: 18,
+            ),
+            label: Text(resumable ? s.resume : s.pause),
+          ),
+          const SizedBox(width: 4),
+          TextButton.icon(
+            onPressed: onRemove,
+            style: TextButton.styleFrom(
+              foregroundColor: scheme.error,
+              minimumSize: const Size(0, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            icon: const Icon(Icons.delete_outline_rounded, size: 18),
+            label: Text(s.remove),
+          ),
+          const Spacer(),
+          IconButton(
+            tooltip: s.openFolder,
+            onPressed: onOpenFolder,
+            iconSize: 20,
+            icon: const Icon(Icons.folder_open_rounded),
+          ),
+          if (onClose case final close?)
+            IconButton(
+              tooltip: '${s.hideDetails} (Esc)',
+              onPressed: close,
+              iconSize: 20,
+              icon: const Icon(Icons.close_rounded),
+            ),
+        ],
+      ),
+    );
+
+    final content = SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -247,28 +279,17 @@ class TorrentDetails extends StatelessWidget {
                   )
                 : '—',
           ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              FilledButton.icon(
-                onPressed: onToggle,
-                icon: Icon(
-                  resumable ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                  size: 20,
-                ),
-                label: Text(resumable ? s.resume : s.pause),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: onRemove,
-                style: TextButton.styleFrom(foregroundColor: scheme.error),
-                icon: const Icon(Icons.delete_outline_rounded, size: 20),
-                label: Text(s.remove),
-              ),
-            ],
-          ),
         ],
       ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        bar,
+        const Divider(height: 1),
+        Expanded(child: content),
+      ],
     );
   }
 

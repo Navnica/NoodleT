@@ -67,4 +67,64 @@ void main() {
     expect(order(TorrentSort.size), ['c', 'd', 'a', 'b']);
     expect(order(TorrentSort.speed), ['b', 'c', 'd', 'a']);
   });
+
+  group('the check for updates', () {
+    late HttpServer github;
+    var answer = '';
+    var code = 200;
+
+    setUp(() async {
+      // Stands in for GitHub's "latest release".
+      github = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      github.listen((request) {
+        request.response
+          ..statusCode = code
+          ..write(answer)
+          ..close();
+      });
+    });
+
+    tearDown(() => github.close(force: true));
+
+    Future<UpdateCheck> check() => Updates.check(
+      source: Uri.parse('http://127.0.0.1:${github.port}/latest'),
+    );
+
+    test('finds a newer release', () async {
+      answer = '{"tag_name": "v99.0.0"}';
+      code = 200;
+      expect(await check(), (
+        status: UpdateStatus.available,
+        version: '99.0.0',
+      ));
+    });
+
+    test('says when this is the latest', () async {
+      answer = '{"tag_name": "v$appVersion"}';
+      code = 200;
+      expect(await check(), (
+        status: UpdateStatus.upToDate,
+        version: appVersion,
+      ));
+    });
+
+    test('says when GitHub does not answer properly', () async {
+      answer = '{"message": "API rate limit exceeded"}';
+      code = 403;
+      expect((await check()).status, UpdateStatus.failed);
+      code = 200;
+      answer = 'not json';
+      expect((await check()).status, UpdateStatus.failed);
+    });
+
+    test('says when GitHub cannot be reached', () async {
+      final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = closed.port;
+      await closed.close();
+      final result = await Updates.check(
+        source: Uri.parse('http://127.0.0.1:$port/latest'),
+      );
+      expect(result.status, UpdateStatus.failed);
+    });
+  });
 }

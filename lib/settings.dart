@@ -58,6 +58,77 @@ enum AppAccent {
       values.asNameMap()[name] ?? AppAccent.noodlet;
 }
 
+/// The kind of proxy the torrent traffic goes through. SOCKS5 only: an HTTP
+/// proxy cannot carry UDP, so the DHT and the UDP trackers would go around
+/// it. A proxy saved as "http" by an earlier version reads as none.
+enum ProxyKind {
+  none,
+
+  /// Everything, UDP too.
+  socks5;
+
+  static ProxyKind parse(Object? name) =>
+      values.asNameMap()[name] ?? ProxyKind.none;
+}
+
+/// The proxy the torrent traffic goes through, if any.
+class ProxyConfig {
+  const ProxyConfig({
+    this.kind = ProxyKind.none,
+    this.host = '',
+    this.port = 0,
+    this.username = '',
+    this.password = '',
+  });
+
+  final ProxyKind kind;
+  final String host;
+  final int port;
+
+  /// Both empty when the proxy needs no login.
+  final String username;
+  final String password;
+
+  bool get enabled => kind != ProxyKind.none;
+
+  /// Whether it can be used: no proxy at all, or a host and a port.
+  bool get isValid =>
+      !enabled || (host.trim().isNotEmpty && port > 0 && port <= 65535);
+
+  Map<String, dynamic> toJson() => {
+    'type': kind.name,
+    'host': host,
+    'port': port,
+    'username': username,
+    'password': password,
+  };
+
+  static ProxyConfig fromJson(Object? json) {
+    if (json is! Map) return const ProxyConfig();
+    final port = json['port'];
+    String text(String key) => json[key] is String ? json[key] as String : '';
+    return ProxyConfig(
+      kind: ProxyKind.parse(json['type']),
+      host: text('host'),
+      port: port is int ? port : 0,
+      username: text('username'),
+      password: text('password'),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is ProxyConfig &&
+      other.kind == kind &&
+      other.host == host &&
+      other.port == port &&
+      other.username == username &&
+      other.password == password;
+
+  @override
+  int get hashCode => Object.hash(kind, host, port, username, password);
+}
+
 /// The order of the torrent list.
 enum TorrentSort {
   /// Newest first.
@@ -90,6 +161,7 @@ class AppSettings {
     this.checkUpdates = true,
     this.themeMode = AppThemeMode.system,
     this.accent = AppAccent.noodlet,
+    this.proxy = const ProxyConfig(),
   });
 
   /// The ports a user may choose; below are the ones that need privileges.
@@ -126,6 +198,8 @@ class AppSettings {
   final AppThemeMode themeMode;
   final AppAccent accent;
 
+  final ProxyConfig proxy;
+
   AppSettings copyWith({
     String? downloadDir,
     int? listenPort,
@@ -138,6 +212,7 @@ class AppSettings {
     bool? checkUpdates,
     AppThemeMode? themeMode,
     AppAccent? accent,
+    ProxyConfig? proxy,
   }) => AppSettings(
     downloadDir: downloadDir ?? this.downloadDir,
     listenPort: listenPort ?? this.listenPort,
@@ -150,6 +225,7 @@ class AppSettings {
     checkUpdates: checkUpdates ?? this.checkUpdates,
     themeMode: themeMode ?? this.themeMode,
     accent: accent ?? this.accent,
+    proxy: proxy ?? this.proxy,
   );
 
   Map<String, dynamic> toJson() => {
@@ -164,6 +240,7 @@ class AppSettings {
     'check_updates': checkUpdates,
     'theme_mode': themeMode.name,
     'accent': accent.name,
+    'proxy': proxy.toJson(),
   };
 }
 
@@ -217,6 +294,7 @@ class SettingsStore {
       checkUpdates: json['check_updates'] != false,
       themeMode: AppThemeMode.parse(json['theme_mode']),
       accent: AppAccent.parse(json['accent']),
+      proxy: ProxyConfig.fromJson(json['proxy']),
     );
     if (json.isEmpty) await save(settings);
     return settings;

@@ -3,6 +3,21 @@ import 'dart:io';
 
 import 'version.dart';
 
+/// What a look for a newer release found.
+enum UpdateStatus {
+  /// This build is the latest release, or newer.
+  upToDate,
+
+  /// A newer release is out.
+  available,
+
+  /// GitHub could not be reached or made no sense.
+  failed,
+}
+
+/// The [status] of a check and the latest [version] it saw, if any.
+typedef UpdateCheck = ({UpdateStatus status, String version});
+
 /// Looks for a newer release of NoodleT on GitHub.
 abstract final class Updates {
   /// Where the user downloads the latest installer.
@@ -13,13 +28,13 @@ abstract final class Updates {
     'https://api.github.com/repos/Navnica/NoodleT/releases/latest',
   );
 
-  /// The version of the latest release when it is newer than this build,
-  /// null when it is not or when GitHub cannot be reached.
-  static Future<String?> newerVersion() async {
+  /// Asks GitHub for the latest release; [source] replaces it in the tests.
+  static Future<UpdateCheck> check({Uri? source}) async {
+    const failed = (status: UpdateStatus.failed, version: '');
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
-      final request = await client.getUrl(_latest);
+      final request = await client.getUrl(source ?? _latest);
       // GitHub turns away requests without one.
       request.headers
         ..set(HttpHeaders.userAgentHeader, 'NoodleT/$appVersion')
@@ -27,14 +42,22 @@ abstract final class Updates {
       final response = await request.close().timeout(
         const Duration(seconds: 15),
       );
-      if (response.statusCode != HttpStatus.ok) return null;
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        return failed;
+      }
       final body = await response.transform(utf8.decoder).join();
       final tag = (jsonDecode(body) as Map<String, dynamic>)['tag_name'];
-      if (tag is! String) return null;
+      if (tag is! String) return failed;
       final version = tag.startsWith('v') ? tag.substring(1) : tag;
-      return isNewer(version, appVersion) ? version : null;
+      return (
+        status: isNewer(version, appVersion)
+            ? UpdateStatus.available
+            : UpdateStatus.upToDate,
+        version: version,
+      );
     } on Object {
-      return null;
+      return failed;
     } finally {
       client.close(force: true);
     }
