@@ -315,67 +315,60 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final label = theme.textTheme.labelLarge?.copyWith(
-      color: scheme.onSurfaceVariant,
-    );
-
     return AlertDialog(
       title: Text(s.settings),
       // Scrolls when the window is too low for all the settings.
       content: SizedBox(
-        width: 460,
+        width: 640,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(s.downloadFolder, style: label),
-              const SizedBox(height: 8),
-              FolderField(
-                path: _dir,
-                onChanged: (dir) => setState(() => _dir = dir),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(child: _limit(s.downloadLimit, _down, label)),
-                  const SizedBox(width: 16),
-                  Expanded(child: _limit(s.uploadLimit, _up, label)),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text(s.listenPort, style: label),
-              const SizedBox(height: 8),
-              ValueListenableBuilder(
-                valueListenable: _port,
-                builder: (context, _, _) => TextField(
-                  controller: _port,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(5),
-                  ],
-                  decoration: InputDecoration(
-                    hintText: s.portHint(
-                      AppSettings.minPort,
-                      AppSettings.maxPort,
-                    ),
-                    errorText: _portValue == null
-                        ? s.portHint(AppSettings.minPort, AppSettings.maxPort)
-                        : null,
-                    helperText: _portState(s),
-                    helperMaxLines: 3,
-                  ),
+              _Group(s.settingsDownloads),
+              _Setting(
+                title: s.downloadFolder,
+                wide: true,
+                control: FolderField(
+                  path: _dir,
+                  onChanged: (dir) => setState(() => _dir = dir),
                 ),
               ),
-              const SizedBox(height: 20),
-              Text(s.language, style: label),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<AppLanguage>(
+              _Setting(
+                title: s.seedAfter,
+                hint: s.seedAfterHint,
+                control: Switch(
+                  value: _seed,
+                  onChanged: (value) => setState(() => _seed = value),
+                ),
+              ),
+              _Group(s.settingsSpeed),
+              _Setting(
+                title: s.downloadLimit,
+                hint: s.limitsHint,
+                control: _number(_down, 7),
+              ),
+              _Setting(
+                title: s.uploadLimit,
+                hint: s.limitsHint,
+                control: _number(_up, 7),
+              ),
+              _Group(s.settingsConnection),
+              ValueListenableBuilder(
+                valueListenable: _port,
+                builder: (context, _, _) => _Setting(
+                  title: s.listenPort,
+                  hint: _portValue == null
+                      ? s.portHint(AppSettings.minPort, AppSettings.maxPort)
+                      : _portState(s),
+                  error: _portValue == null,
+                  control: _number(_port, 5, suffix: false),
+                ),
+              ),
+              _Group(s.settingsInterface),
+              _Setting(
+                title: s.language,
+                control: SegmentedButton<AppLanguage>(
                   showSelectedIcon: false,
                   segments: [
                     ButtonSegment(
@@ -396,42 +389,21 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                       setState(() => _language = choice.single),
                 ),
               ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                value: _seed,
-                onChanged: (value) => setState(() => _seed = value),
-                title: Text(s.seedAfter),
-                subtitle: Text(
-                  s.seedAfterHint,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+              _Setting(
+                title: s.closeToTray,
+                hint: s.closeToTrayHint,
+                control: Switch(
+                  value: _tray,
+                  onChanged: (value) => setState(() => _tray = value),
                 ),
-                contentPadding: EdgeInsets.zero,
               ),
-              SwitchListTile(
-                value: _tray,
-                onChanged: (value) => setState(() => _tray = value),
-                title: Text(s.closeToTray),
-                subtitle: Text(
-                  s.closeToTrayHint,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+              _Setting(
+                title: s.checkUpdates,
+                hint: s.checkUpdatesHint,
+                control: Switch(
+                  value: _updates,
+                  onChanged: (value) => setState(() => _updates = value),
                 ),
-                contentPadding: EdgeInsets.zero,
-              ),
-              SwitchListTile(
-                value: _updates,
-                onChanged: (value) => setState(() => _updates = value),
-                title: Text(s.checkUpdates),
-                subtitle: Text(
-                  s.checkUpdatesHint,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                contentPadding: EdgeInsets.zero,
               ),
             ],
           ),
@@ -454,26 +426,106 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     );
   }
 
-  Widget _limit(String title, TextEditingController field, TextStyle? label) {
+  /// A short number field: a speed limit in KB/s or the port.
+  Widget _number(
+    TextEditingController field,
+    int digits, {
+    bool suffix = true,
+  }) {
     final s = AppLocalizations.of(context);
-    return Column(
+    return SizedBox(
+      width: suffix ? 150 : 110,
+      child: TextField(
+        controller: field,
+        keyboardType: TextInputType.number,
+        textAlign: TextAlign.end,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(digits),
+        ],
+        decoration: InputDecoration(
+          hintText: suffix ? s.limitHint : null,
+          suffixText: suffix ? s.kbPerSecond : null,
+        ),
+      ),
+    );
+  }
+}
+
+/// The heading of a few settings that belong together.
+class _Group extends StatelessWidget {
+  const _Group(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, bottom: 4),
+      child: Text(
+        title,
+        style: theme.textTheme.labelLarge?.copyWith(
+          color: theme.colorScheme.primary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+/// One setting on a line: what it is on the left, its control on the right,
+/// or under the name when [wide].
+class _Setting extends StatelessWidget {
+  const _Setting({
+    required this.title,
+    required this.control,
+    this.hint,
+    this.error = false,
+    this.wide = false,
+  });
+
+  final String title;
+  final String? hint;
+
+  /// Shows the hint as an error.
+  final bool error;
+  final bool wide;
+  final Widget control;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final text = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: label),
-        const SizedBox(height: 8),
-        TextField(
-          controller: field,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(7),
-          ],
-          decoration: InputDecoration(
-            hintText: s.limitHint,
-            suffixText: s.kbPerSecond,
+        Text(title, style: theme.textTheme.bodyLarge),
+        if (hint case final hint?) ...[
+          const SizedBox(height: 2),
+          Text(
+            hint,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: error ? scheme.error : scheme.onSurfaceVariant,
+            ),
           ),
-        ),
+        ],
       ],
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: wide
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [text, const SizedBox(height: 8), control],
+            )
+          : Row(
+              children: [
+                Expanded(child: text),
+                const SizedBox(width: 24),
+                control,
+              ],
+            ),
     );
   }
 }

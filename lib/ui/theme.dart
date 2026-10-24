@@ -132,6 +132,8 @@ ThemeData buildTheme(Brightness brightness) {
       backgroundColor: scheme.inverseSurface,
       contentTextStyle: TextStyle(color: scheme.onInverseSurface),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      // A toast at the bottom, not a bar across a wide window.
+      width: 480,
     ),
     popupMenuTheme: PopupMenuThemeData(
       color: scheme.surfaceContainerHigh,

@@ -7,7 +7,7 @@ import 'package:noodlet/app_controller.dart';
 import 'package:noodlet/engine/engine.dart';
 import 'package:noodlet/l10n/app_localizations.dart';
 import 'package:noodlet/settings.dart';
-import 'package:noodlet/ui/details_sheet.dart';
+import 'package:noodlet/ui/details_panel.dart';
 import 'package:noodlet/ui/dialogs.dart';
 import 'package:noodlet/ui/theme.dart';
 import 'package:noodlet/ui/torrent_row.dart';
@@ -312,6 +312,8 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
     expect(find.text(_ru.language), findsOneWidget);
+    await tester.ensureVisible(find.text('English'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('English'));
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, _ru.save));

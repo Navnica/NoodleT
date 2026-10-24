@@ -14,6 +14,8 @@ import 'ui/theme.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
+  // Room for the list and the details panel next to it.
+  await windowManager.setMinimumSize(const Size(720, 480));
 
   AppController? controller;
   Tray? tray;

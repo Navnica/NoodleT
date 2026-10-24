@@ -6,7 +6,7 @@
   "download": "Загрузка",
   "upload": "Отдача",
   "emptyTitle": "Загрузок пока нет",
-  "emptyHint": "Вставьте magnet-ссылку в строку внизу\nили перетащите .torrent-файл в окно",
+  "emptyHint": "Вставьте magnet-ссылку в строку сверху\nили перетащите .torrent-файл в окно",
   "dropHere": "Отпустите, чтобы добавить",
   "add": "Добавить",
   "cancel": "Отмена",
@@ -108,5 +108,11 @@
   "checkUpdates": "Проверять обновления",
   "checkUpdatesHint": "При запуске, на странице NoodleT на GitHub",
   "updateAvailable": "Вышел NoodleT {version}",
-  "updateDownload": "Скачать"
+  "updateDownload": "Скачать",
+  "hideDetails": "Закрыть",
+  "settingsDownloads": "Загрузки",
+  "settingsSpeed": "Скорость",
+  "settingsConnection": "Сеть",
+  "settingsInterface": "Приложение",
+  "limitsHint": "Пусто — без ограничений"
 }

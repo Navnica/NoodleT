@@ -17,9 +17,17 @@ class TorrentRow extends StatelessWidget {
     required this.onToggle,
     required this.onOpenFolder,
     required this.onRemove,
+    this.selected = false,
+    this.onContextMenu,
   });
 
   final Torrent torrent;
+
+  /// Its details are open next to the list.
+  final bool selected;
+
+  /// A right click, at the pointer.
+  final ValueChanged<Offset>? onContextMenu;
 
   /// Opens the details of the torrent.
   final VoidCallback onTap;
@@ -44,7 +52,9 @@ class TorrentRow extends StatelessWidget {
         final side = _side(s);
         return _StateCard(
           color: accent,
+          selected: selected,
           onTap: onTap,
+          onSecondaryTap: onContextMenu,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 9, 2, 9),
             child: Row(
@@ -240,12 +250,16 @@ class TorrentRow extends StatelessWidget {
 class _StateCard extends StatelessWidget {
   const _StateCard({
     required this.color,
+    required this.selected,
     required this.onTap,
+    required this.onSecondaryTap,
     required this.child,
   });
 
   final Color color;
+  final bool selected;
   final VoidCallback onTap;
+  final ValueChanged<Offset>? onSecondaryTap;
   final Widget child;
 
   @override
@@ -256,9 +270,21 @@ class _StateCard extends StatelessWidget {
         color.withValues(alpha: 0.09),
         scheme.surfaceContainerLow,
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: selected ? color.withValues(alpha: 0.7) : Colors.transparent,
+          width: 1.5,
+        ),
+      ),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(onTap: onTap, child: child),
+      child: InkWell(
+        onTap: onTap,
+        onSecondaryTapUp: onSecondaryTap == null
+            ? null
+            : (details) => onSecondaryTap!(details.globalPosition),
+        child: child,
+      ),
     );
   }
 }

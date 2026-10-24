@@ -6,7 +6,7 @@
   "download": "Download",
   "upload": "Upload",
   "emptyTitle": "No downloads yet",
-  "emptyHint": "Paste a magnet link into the field below\nor drop a .torrent file into the window",
+  "emptyHint": "Paste a magnet link into the field above\nor drop a .torrent file into the window",
   "dropHere": "Drop to add",
   "add": "Add",
   "cancel": "Cancel",
@@ -284,5 +284,11 @@
       }
     }
   },
-  "updateDownload": "Download"
+  "updateDownload": "Download",
+  "hideDetails": "Close",
+  "settingsDownloads": "Downloads",
+  "settingsSpeed": "Speed",
+  "settingsConnection": "Network",
+  "settingsInterface": "Application",
+  "limitsHint": "Empty means no limit"
 }

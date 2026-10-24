@@ -13,7 +13,7 @@ import '../notice.dart';
 import '../settings.dart';
 import '../tray.dart';
 import '../updates.dart';
-import 'details_sheet.dart';
+import 'details_panel.dart';
 import 'dialogs.dart';
 import 'format.dart';
 import 'system.dart';
@@ -55,6 +55,9 @@ class _HomePageState extends State<HomePage> {
   final _searchFocus = FocusNode();
   _Filter _filter = _Filter.all;
   bool _dragging = false;
+
+  /// The torrent whose details are open next to the list.
+  String? _selected;
 
   AppController get _controller => widget.controller;
 
@@ -128,8 +131,6 @@ class _HomePageState extends State<HomePage> {
       ..showSnackBar(
         SnackBar(
           content: Text(text),
-          // Above the dock, not over it.
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, _Dock.reserved - 12),
           action: notice.kind == NoticeKind.update
               ? SnackBarAction(
                   label: s.updateDownload,
@@ -250,6 +251,72 @@ class _HomePageState extends State<HomePage> {
 
   void _openSettings() => showSettingsDialog(context, _controller);
 
+  /// Whether a text field has the keys, so that they are left to it.
+  static bool get _typing {
+    final context = FocusManager.instance.primaryFocus?.context;
+    return context != null &&
+        context.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  /// Esc closes the details, Delete removes the torrent they show and Space
+  /// pauses or resumes it.
+  KeyEventResult _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent || _typing) return KeyEventResult.ignored;
+    final torrent = _controller.torrents
+        .where((t) => t.id == _selected)
+        .firstOrNull;
+    if (torrent == null) return KeyEventResult.ignored;
+    switch (event.logicalKey) {
+      case LogicalKeyboardKey.escape:
+        setState(() => _selected = null);
+      case LogicalKeyboardKey.delete:
+        _remove(torrent);
+      case LogicalKeyboardKey.space:
+        _controller.toggle(torrent);
+      default:
+        return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
+  Future<void> _contextMenu(Torrent torrent, Offset position) async {
+    setState(() => _selected = torrent.id);
+    final s = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final resumable = torrent.isPaused || torrent.state == TorrentState.error;
+    final action = await showMenu<VoidCallback>(
+      context: context,
+      position: RelativeRect.fromRect(
+        position & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem(
+          value: () => _controller.toggle(torrent),
+          child: _MenuRow(
+            resumable ? Icons.play_arrow_rounded : Icons.pause_rounded,
+            resumable ? s.resume : s.pause,
+          ),
+        ),
+        PopupMenuItem(
+          value: () => _openFolder(torrent),
+          child: _MenuRow(Icons.folder_open_rounded, s.openFolder),
+        ),
+        PopupMenuItem(
+          value: () => _remove(torrent),
+          child: _MenuRow(
+            Icons.delete_outline_rounded,
+            s.remove,
+            color: scheme.error,
+          ),
+        ),
+      ],
+    );
+    action?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -274,6 +341,7 @@ class _HomePageState extends State<HomePage> {
           },
           child: Focus(
             autofocus: true,
+            onKeyEvent: (_, event) => _onKey(event),
             child: Stack(
               children: [
                 ListenableBuilder(
@@ -303,76 +371,92 @@ class _HomePageState extends State<HomePage> {
   Widget _layout() {
     final torrents = _controller.torrents;
     final shown = _shown(torrents);
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 900),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: torrents.isEmpty
-                  ? const _EmptyState()
-                  : Column(
-                      children: [
-                        _Toolbar(
-                          search: _search,
-                          searchFocus: _searchFocus,
-                          filter: _filter,
-                          sort: _controller.settings.sort,
-                          canPauseAll: _controller.canPauseAll,
-                          canResumeAll: _controller.canResumeAll,
-                          onFilter: (filter) =>
-                              setState(() => _filter = filter),
-                          onSort: (sort) => _controller.updateSettings(
-                            _controller.settings.copyWith(sort: sort),
-                          ),
-                          onPauseAll: _controller.pauseAll,
-                          onResumeAll: _controller.resumeAll,
-                        ),
-                        Expanded(
-                          child: shown.isEmpty
-                              ? const _NothingFound()
-                              : _list(shown),
-                        ),
-                      ],
-                    ),
-            ),
-            Align(
-              alignment: Alignment.bottomCenter,
-              child: _Dock(
-                input: _input,
-                downloadRate: _controller.downloadRate,
-                uploadRate: _controller.uploadRate,
-                onSubmit: _add,
-                onPaste: _paste,
-                onOpenFiles: _openFiles,
-                onSettings: _openSettings,
-              ),
-            ),
-          ],
+    final selected = _selected;
+    return Column(
+      children: [
+        _TopBar(
+          input: _input,
+          downloadRate: _controller.downloadRate,
+          uploadRate: _controller.uploadRate,
+          onSubmit: _add,
+          onPaste: _paste,
+          onOpenFiles: _openFiles,
+          onSettings: _openSettings,
         ),
-      ),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: torrents.isEmpty
+                    ? const _EmptyState()
+                    : Column(
+                        children: [
+                          _Toolbar(
+                            search: _search,
+                            searchFocus: _searchFocus,
+                            filter: _filter,
+                            sort: _controller.settings.sort,
+                            canPauseAll: _controller.canPauseAll,
+                            canResumeAll: _controller.canResumeAll,
+                            onFilter: (filter) =>
+                                setState(() => _filter = filter),
+                            onSort: (sort) => _controller.updateSettings(
+                              _controller.settings.copyWith(sort: sort),
+                            ),
+                            onPauseAll: _controller.pauseAll,
+                            onResumeAll: _controller.resumeAll,
+                          ),
+                          Expanded(
+                            child: shown.isEmpty
+                                ? const _NothingFound()
+                                : _list(shown),
+                          ),
+                        ],
+                      ),
+              ),
+              if (selected != null) ...[
+                const VerticalDivider(width: 1),
+                SizedBox(
+                  width: 420,
+                  child: ColoredBox(
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
+                    child: DetailsPanel(
+                      key: ValueKey(selected),
+                      controller: _controller,
+                      id: selected,
+                      onOpenFolder: _openFolder,
+                      onRemove: _remove,
+                      onClose: () {
+                        if (mounted) setState(() => _selected = null);
+                      },
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 
-  void _openDetails(Torrent torrent) => showDetailsSheet(
-    context,
-    controller: _controller,
-    id: torrent.id,
-    onOpenFolder: _openFolder,
-    onRemove: _remove,
-  );
+  /// A click on the open torrent closes its details.
+  void _openDetails(Torrent torrent) =>
+      setState(() => _selected = _selected == torrent.id ? null : torrent.id);
 
-  /// The cards scroll under the floating dock.
   Widget _list(List<Torrent> torrents) => ListView.separated(
-    padding: const EdgeInsets.fromLTRB(14, 4, 14, _Dock.reserved),
+    padding: const EdgeInsets.fromLTRB(14, 2, 14, 14),
     itemCount: torrents.length,
-    separatorBuilder: (_, _) => const SizedBox(height: 8),
+    separatorBuilder: (_, _) => const SizedBox(height: 6),
     itemBuilder: (context, index) {
       final torrent = torrents[index];
       return TorrentRow(
         key: ValueKey(torrent.id),
         torrent: torrent,
+        selected: torrent.id == _selected,
         onTap: () => _openDetails(torrent),
+        onContextMenu: (position) => _contextMenu(torrent, position),
         onToggle: () => _controller.toggle(torrent),
         onOpenFolder: () => _openFolder(torrent),
         onRemove: () => _remove(torrent),
@@ -533,25 +617,21 @@ class _NothingFound extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: _Dock.reserved),
-      child: Center(
-        child: Text(
-          AppLocalizations.of(context).nothingFound,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
+    return Center(
+      child: Text(
+        AppLocalizations.of(context).nothingFound,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
     );
   }
 }
 
-/// The floating bar at the bottom with every control of the application:
-/// the .torrent button, the field for magnet links, the total speed, the
-/// settings and the add button.
-class _Dock extends StatelessWidget {
-  const _Dock({
+/// The bar along the top of the window: the .torrent button, the field for
+/// magnet links, the add button, the total speed and the settings.
+class _TopBar extends StatelessWidget {
+  const _TopBar({
     required this.input,
     required this.downloadRate,
     required this.uploadRate,
@@ -569,93 +649,89 @@ class _Dock extends StatelessWidget {
   final VoidCallback onOpenFiles;
   final VoidCallback onSettings;
 
-  /// The space the content above has to leave free for the dock.
-  static const reserved = 78.0;
-
   @override
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: Material(
-          color: scheme.surfaceContainer,
-          elevation: 16,
-          shadowColor: Colors.black,
-          shape: StadiumBorder(side: BorderSide(color: scheme.outlineVariant)),
-          child: Padding(
-            padding: const EdgeInsets.all(4),
-            child: LayoutBuilder(
-              builder: (context, constraints) => Row(
-                children: [
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 22,
-                    tooltip: s.openFile,
-                    onPressed: onOpenFiles,
-                    icon: const Icon(Icons.attach_file_rounded),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: input,
-                      onSubmitted: onSubmit,
-                      style: theme.textTheme.bodyMedium,
-                      decoration: InputDecoration(
-                        hintText: s.inputHint,
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 8,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (constraints.maxWidth >= 340) ...[
-                    const SizedBox(width: 6),
-                    _Speed(downloadRate: downloadRate, uploadRate: uploadRate),
-                    const SizedBox(width: 2),
-                  ],
-                  IconButton(
-                    visualDensity: VisualDensity.compact,
-                    iconSize: 22,
-                    tooltip: s.settings,
-                    onPressed: onSettings,
-                    icon: const Icon(Icons.settings_rounded),
-                  ),
-                  const SizedBox(width: 2),
-                  // With nothing typed the button takes the link from the
-                  // clipboard instead.
-                  ValueListenableBuilder(
-                    valueListenable: input,
-                    builder: (context, value, _) {
-                      final empty = value.text.trim().isEmpty;
-                      return IconButton.filled(
-                        visualDensity: VisualDensity.compact,
-                        tooltip: s.add,
-                        onPressed: empty ? onPaste : () => onSubmit(value.text),
-                        icon: Icon(
-                          empty
-                              ? Icons.content_paste_rounded
-                              : Icons.arrow_upward_rounded,
-                          size: 18,
-                        ),
-                      );
-                    },
-                  ),
-                ],
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      decoration: BoxDecoration(
+        // The page's own colour, so that the field stands out as the
+        // search field below does.
+        color: scheme.surface,
+        border: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: s.openFile,
+            onPressed: onOpenFiles,
+            icon: const Icon(Icons.attach_file_rounded),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: SizedBox(
+              height: 40,
+              child: TextField(
+                controller: input,
+                onSubmitted: onSubmit,
+                style: theme.textTheme.bodyMedium,
+                textAlignVertical: TextAlignVertical.center,
+                decoration: InputDecoration(
+                  hintText: s.inputHint,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                ),
               ),
             ),
           ),
-        ),
+          const SizedBox(width: 6),
+          // With nothing typed the button takes the link from the
+          // clipboard instead.
+          ValueListenableBuilder(
+            valueListenable: input,
+            builder: (context, value, _) {
+              final empty = value.text.trim().isEmpty;
+              return IconButton.filled(
+                tooltip: empty ? '${s.add} (Ctrl+V)' : s.add,
+                onPressed: empty ? onPaste : () => onSubmit(value.text),
+                icon: Icon(
+                  empty ? Icons.content_paste_rounded : Icons.add_rounded,
+                  size: 20,
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 12),
+          _Speed(downloadRate: downloadRate, uploadRate: uploadRate),
+          const SizedBox(width: 4),
+          IconButton(
+            tooltip: s.settings,
+            onPressed: onSettings,
+            icon: const Icon(Icons.settings_rounded),
+          ),
+        ],
       ),
     );
   }
+}
+
+class _MenuRow extends StatelessWidget {
+  const _MenuRow(this.icon, this.label, {this.color});
+
+  final IconData icon;
+  final String label;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, size: 20, color: color),
+      const SizedBox(width: 12),
+      Text(label, style: TextStyle(color: color)),
+    ],
+  );
 }
 
 /// The total download and upload speed, one above the other.
@@ -712,7 +788,7 @@ class _EmptyState extends StatelessWidget {
     final scheme = theme.colorScheme;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, _Dock.reserved),
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

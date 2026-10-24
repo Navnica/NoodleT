@@ -9,71 +9,69 @@ import 'format.dart';
 import '../l10n/app_localizations.dart';
 import 'theme.dart';
 
-/// Slides up a panel with everything known about the torrent [id]. It follows
-/// the torrent live and closes by itself once the torrent is gone.
-Future<void> showDetailsSheet(
-  BuildContext context, {
-  required AppController controller,
-  required String id,
-  required void Function(Torrent) onOpenFolder,
-  required void Function(Torrent) onRemove,
-}) => showModalBottomSheet<void>(
-  context: context,
-  isScrollControlled: true,
-  showDragHandle: true,
-  constraints: const BoxConstraints(maxWidth: 680),
-  builder: (_) => _DetailsSheet(
-    controller: controller,
-    id: id,
-    onOpenFolder: onOpenFolder,
-    onRemove: onRemove,
-  ),
-);
-
-class _DetailsSheet extends StatelessWidget {
-  const _DetailsSheet({
+/// The panel next to the list with everything known about the torrent [id].
+/// It follows the torrent live and closes by itself once the torrent is gone.
+class DetailsPanel extends StatelessWidget {
+  const DetailsPanel({
+    super.key,
     required this.controller,
     required this.id,
     required this.onOpenFolder,
     required this.onRemove,
+    required this.onClose,
   });
 
   final AppController controller;
   final String id;
   final void Function(Torrent) onOpenFolder;
   final void Function(Torrent) onRemove;
+  final VoidCallback onClose;
 
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-    listenable: controller,
-    builder: (context, _) {
-      final torrent = controller.torrents.where((t) => t.id == id).firstOrNull;
-      if (torrent == null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) Navigator.maybePop(context);
-        });
-        return const SizedBox(height: 120);
-      }
-      return TorrentDetails(
-        torrent: torrent,
-        files: controller.files(torrent.id),
-        onToggle: () => controller.toggle(torrent),
-        onOpenFolder: () => onOpenFolder(torrent),
-        onRemove: () => onRemove(torrent),
-        onFilesWanted: (indexes, wanted) =>
-            controller.setFilesWanted(torrent, indexes, wanted: wanted),
-        onSequential: (sequential) =>
-            controller.setSequential(torrent, sequential: sequential),
-        onMove: () async {
-          final folder = await pickFolder(torrent.savePath);
-          if (folder != null) controller.move(torrent, folder);
-        },
-        trackers: () => controller.trackers(torrent),
-        onAddTrackers: (text) => controller.addTrackers(torrent, text),
-        peers: () => controller.peers(torrent),
-      );
-    },
-  );
+  Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
+    final torrent = controller.torrents.where((t) => t.id == id).firstOrNull;
+    if (torrent == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => onClose());
+      return const SizedBox.shrink();
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(0, 8, 8, 0),
+            child: IconButton(
+              tooltip: '${s.hideDetails} (Esc)',
+              onPressed: onClose,
+              icon: const Icon(Icons.close_rounded, size: 20),
+            ),
+          ),
+        ),
+        Expanded(
+          child: TorrentDetails(
+            torrent: torrent,
+            files: controller.files(torrent.id),
+            onToggle: () => controller.toggle(torrent),
+            onOpenFolder: () => onOpenFolder(torrent),
+            onRemove: () => onRemove(torrent),
+            onFilesWanted: (indexes, wanted) =>
+                controller.setFilesWanted(torrent, indexes, wanted: wanted),
+            onSequential: (sequential) =>
+                controller.setSequential(torrent, sequential: sequential),
+            onMove: () async {
+              final folder = await pickFolder(torrent.savePath);
+              if (folder != null) controller.move(torrent, folder);
+            },
+            trackers: () => controller.trackers(torrent),
+            onAddTrackers: (text) => controller.addTrackers(torrent, text),
+            peers: () => controller.peers(torrent),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// The content of the details panel.
@@ -136,7 +134,7 @@ class TorrentDetails extends StatelessWidget {
     ];
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(28, 0, 28, 24),
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
