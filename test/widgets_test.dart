@@ -77,6 +77,39 @@ void main() {
     expect(find.text(_en.remove), findsOneWidget);
   });
 
+  testWidgets('a double click on a row opens its folder', (tester) async {
+    var tapped = 0;
+    var opened = 0;
+    await tester.pumpWidget(
+      _app(
+        TorrentRow(
+          torrent: _torrent(TorrentState.downloading),
+          onTap: () => tapped++,
+          onToggle: () {},
+          onOpenFolder: () => opened++,
+          onRemove: () {},
+        ),
+      ),
+    );
+    final row = find.text(_torrent(TorrentState.downloading).name);
+
+    // A single click answers at once, without waiting for a second one.
+    await tester.tap(row);
+    expect((tapped, opened), (1, 0));
+
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(row);
+    expect((tapped, opened), (1, 1));
+
+    // Two slow clicks are two single ones.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(row);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(row);
+    expect((tapped, opened), (3, 1));
+    await tester.pump(const Duration(seconds: 1));
+  });
+
   testWidgets('a row is equally tall in every state', (tester) async {
     addTearDown(tester.view.reset);
     tester.view.devicePixelRatio = 1;

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../engine/engine.dart';
@@ -8,7 +11,8 @@ import 'theme.dart';
 enum _MenuAction { openFolder, remove }
 
 /// One torrent in the list: a progress ring, the name with a status line, the
-/// current speed and the actions. A click anywhere else opens the details.
+/// current speed and the actions. A click anywhere else opens the details, a
+/// double click the torrent's folder.
 class TorrentRow extends StatelessWidget {
   const TorrentRow({
     super.key,
@@ -54,6 +58,7 @@ class TorrentRow extends StatelessWidget {
           color: accent,
           selected: selected,
           onTap: onTap,
+          onDoubleTap: onOpenFolder,
           onSecondaryTap: onContextMenu,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 9, 2, 9),
@@ -247,11 +252,12 @@ class TorrentRow extends StatelessWidget {
 }
 
 /// A card of its own for every torrent, tinted with the colour of its state.
-class _StateCard extends StatelessWidget {
+class _StateCard extends StatefulWidget {
   const _StateCard({
     required this.color,
     required this.selected,
     required this.onTap,
+    required this.onDoubleTap,
     required this.onSecondaryTap,
     required this.child,
   });
@@ -259,18 +265,47 @@ class _StateCard extends StatelessWidget {
   final Color color;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onDoubleTap;
   final ValueChanged<Offset>? onSecondaryTap;
   final Widget child;
 
   @override
+  State<_StateCard> createState() => _StateCardState();
+}
+
+class _StateCardState extends State<_StateCard> {
+  /// Runs for as long as a next click makes a double click.
+  Timer? _firstTap;
+
+  /// InkWell's own onDoubleTap holds every single click back until the time
+  /// for a second one is over, and the details would open that much later.
+  void _onTap() {
+    if (_firstTap?.isActive ?? false) {
+      _firstTap!.cancel();
+      widget.onDoubleTap();
+    } else {
+      _firstTap = Timer(kDoubleTapTimeout, () {});
+      widget.onTap();
+    }
+  }
+
+  @override
+  void dispose() {
+    _firstTap?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final color = widget.color;
+    final onSecondaryTap = widget.onSecondaryTap;
     final scheme = Theme.of(context).colorScheme;
     final base = Color.alphaBlend(
       color.withValues(alpha: 0.09),
       scheme.surfaceContainerLow,
     );
     return TweenAnimationBuilder<double>(
-      tween: Tween(end: selected ? 1 : 0),
+      tween: Tween(end: widget.selected ? 1 : 0),
       duration: const Duration(milliseconds: 200),
       curve: Curves.easeOut,
       builder: (context, t, _) => Material(
@@ -286,11 +321,11 @@ class _StateCard extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          onTap: onTap,
+          onTap: _onTap,
           onSecondaryTapUp: onSecondaryTap == null
               ? null
-              : (details) => onSecondaryTap!(details.globalPosition),
-          child: child,
+              : (details) => onSecondaryTap(details.globalPosition),
+          child: widget.child,
         ),
       ),
     );
