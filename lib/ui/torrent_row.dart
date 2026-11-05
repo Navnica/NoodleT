@@ -12,7 +12,9 @@ enum _MenuAction { openFolder, remove }
 
 /// One torrent in the list: a progress ring, the name with a status line, the
 /// current speed and the actions. A click anywhere else opens the details, a
-/// double click the torrent's folder.
+/// double click the torrent's folder; while torrents are being picked for a
+/// common action every click counts on its own and the ring gives way to a
+/// mark.
 class TorrentRow extends StatelessWidget {
   const TorrentRow({
     super.key,
@@ -22,6 +24,7 @@ class TorrentRow extends StatelessWidget {
     required this.onOpenFolder,
     required this.onRemove,
     this.selected = false,
+    this.checked,
     this.onContextMenu,
   });
 
@@ -29,6 +32,9 @@ class TorrentRow extends StatelessWidget {
 
   /// Its details are open next to the list.
   final bool selected;
+
+  /// Whether it is picked, while torrents are being picked; null otherwise.
+  final bool? checked;
 
   /// A right click, at the pointer.
   final ValueChanged<Offset>? onContextMenu;
@@ -56,22 +62,25 @@ class TorrentRow extends StatelessWidget {
         final side = _side(s);
         return _StateCard(
           color: accent,
-          selected: selected,
+          selected: selected || checked == true,
           onTap: onTap,
-          onDoubleTap: onOpenFolder,
+          onDoubleTap: checked == null ? onOpenFolder : null,
           onSecondaryTap: onContextMenu,
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 9, 2, 9),
             child: Row(
               children: [
-                _Ring(
-                  progress: torrent.shownState == TorrentState.metadata
-                      ? null
-                      : torrent.progress,
-                  color: accent,
-                  track: scheme.surfaceContainerHighest,
-                  child: _ringContent(theme, accent),
-                ),
+                if (checked case final checked?)
+                  _CheckMark(checked: checked)
+                else
+                  _Ring(
+                    progress: torrent.shownState == TorrentState.metadata
+                        ? null
+                        : torrent.progress,
+                    color: accent,
+                    track: scheme.surfaceContainerHighest,
+                    child: _ringContent(theme, accent),
+                  ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -265,7 +274,9 @@ class _StateCard extends StatefulWidget {
   final Color color;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback onDoubleTap;
+
+  /// null makes every click a single one.
+  final VoidCallback? onDoubleTap;
   final ValueChanged<Offset>? onSecondaryTap;
   final Widget child;
 
@@ -280,9 +291,13 @@ class _StateCardState extends State<_StateCard> {
   /// InkWell's own onDoubleTap holds every single click back until the time
   /// for a second one is over, and the details would open that much later.
   void _onTap() {
-    if (_firstTap?.isActive ?? false) {
+    final onDoubleTap = widget.onDoubleTap;
+    if (onDoubleTap == null) {
+      _firstTap?.cancel();
+      widget.onTap();
+    } else if (_firstTap?.isActive ?? false) {
       _firstTap!.cancel();
-      widget.onDoubleTap();
+      onDoubleTap();
     } else {
       _firstTap = Timer(kDoubleTapTimeout, () {});
       widget.onTap();
@@ -328,6 +343,35 @@ class _StateCardState extends State<_StateCard> {
           child: widget.child,
         ),
       ),
+    );
+  }
+}
+
+/// Stands in for the ring, in its place and size, while torrents are being
+/// picked.
+class _CheckMark extends StatelessWidget {
+  const _CheckMark({required this.checked});
+
+  final bool checked;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      width: _Ring._size,
+      height: _Ring._size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: checked ? scheme.primary : null,
+        border: Border.all(
+          color: checked ? scheme.primary : scheme.outline,
+          width: 2,
+        ),
+      ),
+      child: checked
+          ? Icon(Icons.check_rounded, size: 20, color: scheme.onPrimary)
+          : null,
     );
   }
 }

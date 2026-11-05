@@ -64,6 +64,14 @@ class _HomePageState extends State<HomePage> {
   /// while it slides away.
   String? _shownDetails;
 
+  /// The torrents picked for a common action, always among those the list
+  /// shows. While there are any, a click picks instead of opening the details,
+  /// which stay closed.
+  final _checked = <String>{};
+
+  /// The torrent a Shift+click picks from.
+  String? _anchor;
+
   static const _panelWidth = 420.0;
   static const _panelSlide = Duration(milliseconds: 240);
 
@@ -259,10 +267,88 @@ class _HomePageState extends State<HomePage> {
     _add(data?.text ?? '');
   }
 
-  Future<void> _remove(Torrent torrent) async {
-    final deleteFiles = await showRemoveDialog(context, torrent.name);
-    if (deleteFiles != null) {
-      _controller.remove(torrent, deleteFiles: deleteFiles);
+  /// Removing a picked torrent removes all that are picked.
+  Future<void> _remove(Torrent torrent) =>
+      _removeAll(_checked.contains(torrent.id) ? _checkedTorrents : [torrent]);
+
+  Future<void> _removeAll(List<Torrent> group) async {
+    final deleteFiles = await showRemoveDialog(context, [
+      for (final torrent in group) torrent.name,
+    ]);
+    if (deleteFiles == null || !mounted) return;
+    _controller.removeAll(group, deleteFiles: deleteFiles);
+    setState(() => _checked.removeAll(group.map((t) => t.id)));
+  }
+
+  List<Torrent> get _checkedTorrents => [
+    for (final torrent in _controller.torrents)
+      if (_checked.contains(torrent.id)) torrent,
+  ];
+
+  /// The keys must reach the list now, not the field being typed in.
+  void _leaveField() {
+    if (_typing) {
+      FocusManager.instance.primaryFocus?.unfocus(
+        disposition: UnfocusDisposition.previouslyFocusedChild,
+      );
+    }
+  }
+
+  /// Picks the torrent or lets it go. The torrent whose details are open is
+  /// picked along, as its card already stands out.
+  void _toggleChecked(Torrent torrent) {
+    _leaveField();
+    setState(() {
+      if (_selected case final open? when open != torrent.id) {
+        _checked.add(open);
+      }
+      _selected = null;
+      if (!_checked.remove(torrent.id)) _checked.add(torrent.id);
+      _anchor = torrent.id;
+    });
+  }
+
+  /// Picks everything between the last torrent clicked and this one.
+  void _checkRange(Torrent torrent, List<Torrent> shown) {
+    final anchor = _selected ?? _anchor;
+    final from = shown.indexWhere((t) => t.id == anchor);
+    final to = shown.indexWhere((t) => t.id == torrent.id);
+    final range = from < 0
+        ? [torrent]
+        : shown.sublist(from < to ? from : to, (from < to ? to : from) + 1);
+    _leaveField();
+    setState(() {
+      _selected = null;
+      _checked.addAll(range.map((t) => t.id));
+      _anchor = torrent.id;
+    });
+  }
+
+  void _checkAll() {
+    _leaveField();
+    setState(() {
+      _selected = null;
+      _checked.addAll(_shown(_controller.torrents).map((t) => t.id));
+    });
+  }
+
+  void _clearChecked() => setState(() {
+    _checked.clear();
+    _anchor = null;
+  });
+
+  /// A click on a card: with Shift or Ctrl it picks, and while torrents are
+  /// picked any click does; otherwise it opens the details.
+  void _onRowTap(Torrent torrent, List<Torrent> shown) {
+    final keys = HardwareKeyboard.instance;
+    if (keys.isShiftPressed) {
+      _checkRange(torrent, shown);
+    } else if (keys.isControlPressed ||
+        keys.isMetaPressed ||
+        _checked.isNotEmpty) {
+      _toggleChecked(torrent);
+    } else {
+      _openDetails(torrent);
     }
   }
 
@@ -281,10 +367,28 @@ class _HomePageState extends State<HomePage> {
         context.findAncestorStateOfType<EditableTextState>() != null;
   }
 
-  /// Esc closes the details, Delete removes the torrent they show and Space
-  /// pauses or resumes it.
+  /// Ctrl+A picks every torrent shown. Then Esc lets them go and Delete
+  /// removes them. Without any picked, Esc closes the details, Delete removes
+  /// the torrent they show and Space pauses or resumes it.
   KeyEventResult _onKey(KeyEvent event) {
     if (event is! KeyDownEvent || _typing) return KeyEventResult.ignored;
+    final keys = HardwareKeyboard.instance;
+    if (event.logicalKey == LogicalKeyboardKey.keyA &&
+        (keys.isControlPressed || keys.isMetaPressed)) {
+      _checkAll();
+      return KeyEventResult.handled;
+    }
+    if (_checked.isNotEmpty) {
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.escape:
+          _clearChecked();
+        case LogicalKeyboardKey.delete:
+          _removeAll(_checkedTorrents);
+        default:
+          return KeyEventResult.ignored;
+      }
+      return KeyEventResult.handled;
+    }
     final torrent = _controller.torrents
         .where((t) => t.id == _selected)
         .firstOrNull;
@@ -303,7 +407,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _contextMenu(Torrent torrent, Offset position) async {
-    setState(() => _selected = torrent.id);
+    if (_checked.isEmpty) setState(() => _selected = torrent.id);
     final s = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
     final overlay =
@@ -326,6 +430,12 @@ class _HomePageState extends State<HomePage> {
         PopupMenuItem(
           value: () => _openFolder(torrent),
           child: _MenuRow(Icons.folder_open_rounded, s.openFolder),
+        ),
+        PopupMenuItem(
+          value: () => _toggleChecked(torrent),
+          child: _checked.contains(torrent.id)
+              ? _MenuRow(Icons.remove_done_rounded, s.unselect)
+              : _MenuRow(Icons.check_rounded, s.select),
         ),
         PopupMenuItem(
           value: () => _remove(torrent),
@@ -394,6 +504,8 @@ class _HomePageState extends State<HomePage> {
   Widget _layout() {
     final torrents = _controller.torrents;
     final shown = _shown(torrents);
+    // What a search or a filter hides must not go along unseen.
+    _checked.retainAll(shown.map((t) => t.id));
     final selected = _selected;
     if (selected != null) _shownDetails = selected;
     final panelId = _shownDetails;
@@ -418,21 +530,32 @@ class _HomePageState extends State<HomePage> {
                     ? const _EmptyState()
                     : Column(
                         children: [
-                          _Toolbar(
-                            search: _search,
-                            searchFocus: _searchFocus,
-                            filter: _filter,
-                            sort: _controller.settings.sort,
-                            canPauseAll: _controller.canPauseAll,
-                            canResumeAll: _controller.canResumeAll,
-                            onFilter: (filter) =>
-                                setState(() => _filter = filter),
-                            onSort: (sort) => _controller.updateSettings(
-                              _controller.settings.copyWith(sort: sort),
+                          if (_checked.isEmpty)
+                            _Toolbar(
+                              search: _search,
+                              searchFocus: _searchFocus,
+                              filter: _filter,
+                              sort: _controller.settings.sort,
+                              canPauseAll: _controller.canPauseAll,
+                              canResumeAll: _controller.canResumeAll,
+                              onFilter: (filter) =>
+                                  setState(() => _filter = filter),
+                              onSort: (sort) => _controller.updateSettings(
+                                _controller.settings.copyWith(sort: sort),
+                              ),
+                              onPauseAll: _controller.pauseAll,
+                              onResumeAll: _controller.resumeAll,
+                              onSelectAll: shown.isEmpty ? null : _checkAll,
+                            )
+                          else
+                            _SelectionBar(
+                              count: _checked.length,
+                              onClear: _clearChecked,
+                              onSelectAll: _checked.length < shown.length
+                                  ? _checkAll
+                                  : null,
+                              onRemove: () => _removeAll(_checkedTorrents),
                             ),
-                            onPauseAll: _controller.pauseAll,
-                            onResumeAll: _controller.resumeAll,
-                          ),
                           Expanded(
                             child: shown.isEmpty
                                 ? const _NothingFound()
@@ -523,7 +646,8 @@ class _HomePageState extends State<HomePage> {
         key: ValueKey(torrent.id),
         torrent: torrent,
         selected: torrent.id == _selected,
-        onTap: () => _openDetails(torrent),
+        checked: _checked.isEmpty ? null : _checked.contains(torrent.id),
+        onTap: () => _onRowTap(torrent, torrents),
         onContextMenu: (position) => _contextMenu(torrent, position),
         onToggle: () => _controller.toggle(torrent),
         onOpenFolder: () => _openFolder(torrent),
@@ -575,6 +699,7 @@ class _Toolbar extends StatelessWidget {
     required this.onSort,
     required this.onPauseAll,
     required this.onResumeAll,
+    required this.onSelectAll,
   });
 
   final TextEditingController search;
@@ -587,6 +712,7 @@ class _Toolbar extends StatelessWidget {
   final ValueChanged<TorrentSort> onSort;
   final VoidCallback onPauseAll;
   final VoidCallback onResumeAll;
+  final VoidCallback? onSelectAll;
 
   static String _sortLabel(TorrentSort sort, AppLocalizations s) =>
       switch (sort) {
@@ -627,7 +753,10 @@ class _Toolbar extends StatelessWidget {
                           icon: const Icon(Icons.close_rounded, size: 18),
                         ),
                 ),
-                onTapOutside: (_) => searchFocus.unfocus(),
+                // Back to the page, whose keys would go dead otherwise.
+                onTapOutside: (_) => searchFocus.unfocus(
+                  disposition: UnfocusDisposition.previouslyFocusedChild,
+                ),
               ),
             ),
           ),
@@ -673,7 +802,78 @@ class _Toolbar extends StatelessWidget {
             onPressed: canResumeAll ? onResumeAll : null,
             icon: const Icon(Icons.play_circle_outline_rounded),
           ),
+          IconButton(
+            tooltip: '${s.selectAll} (Ctrl+A)',
+            onPressed: onSelectAll,
+            icon: const Icon(Icons.checklist_rounded),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+/// Takes the place of the toolbar while torrents are picked: how many, and
+/// what can be done with them.
+class _SelectionBar extends StatelessWidget {
+  const _SelectionBar({
+    required this.count,
+    required this.onClear,
+    required this.onSelectAll,
+    required this.onRemove,
+  });
+
+  final int count;
+  final VoidCallback onClear;
+
+  /// null when all are picked already.
+  final VoidCallback? onSelectAll;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+      child: SizedBox(
+        height: 40,
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: '${s.cancel} (Esc)',
+              onPressed: onClear,
+              icon: const Icon(Icons.close_rounded),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                s.selectedCount(count),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: '${s.selectAll} (Ctrl+A)',
+              onPressed: onSelectAll,
+              icon: const Icon(Icons.checklist_rounded),
+            ),
+            const SizedBox(width: 6),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
+              onPressed: onRemove,
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: Text(s.remove),
+            ),
+          ],
+        ),
       ),
     );
   }

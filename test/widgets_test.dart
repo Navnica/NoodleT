@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noodlet/app_controller.dart';
 import 'package:noodlet/engine/engine.dart';
@@ -14,9 +15,9 @@ import 'package:noodlet/ui/theme.dart';
 import 'package:noodlet/version.dart';
 import 'package:noodlet/ui/torrent_row.dart';
 
-Torrent _torrent(TorrentState state) => Torrent(
+Torrent _torrent(TorrentState state, {String? name}) => Torrent(
   id: state.name,
-  name: 'A very long torrent name that certainly does not fit ' * 3,
+  name: name ?? 'A very long torrent name that certainly does not fit ' * 3,
   savePath: r'C:\Downloads',
   state: state,
   progress: 0.4256,
@@ -30,6 +31,19 @@ Torrent _torrent(TorrentState state) => Torrent(
   added: 1760000000,
   error: state == TorrentState.error ? 'Disk is full ' * 20 : '',
 );
+
+/// An engine that only remembers what it was told to remove.
+class _RemovalEngine extends TorrentEngine {
+  final removed = <String>[];
+  bool? deletedFiles;
+  AppController? controller;
+
+  @override
+  void remove(String id, {required bool deleteFiles}) {
+    removed.add(id);
+    deletedFiles = deleteFiles;
+  }
+}
 
 final _en = lookupAppLocalizations(const Locale('en'));
 final _ru = lookupAppLocalizations(const Locale('ru'));
@@ -108,6 +122,166 @@ void main() {
     await tester.tap(row);
     expect((tapped, opened), (3, 1));
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  group('picking torrents', () {
+    const states = [
+      TorrentState.downloading,
+      TorrentState.seeding,
+      TorrentState.paused,
+      TorrentState.error,
+    ];
+
+    Finder row(TorrentState state) => find.byKey(ValueKey(state.name));
+
+    Finder removeButton() => find.widgetWithText(FilledButton, _en.remove);
+
+    /// The picked ones, each with its state as its id.
+    List<String> picked(WidgetTester tester) => [
+      for (final row in tester.widgetList<TorrentRow>(find.byType(TorrentRow)))
+        if (row.checked ?? false) row.torrent.id,
+    ];
+
+    Future<_RemovalEngine> open(WidgetTester tester) async {
+      final dir = Directory.systemTemp.createTempSync('noodlet_pick');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final engine = _RemovalEngine();
+      final controller =
+          AppController(engine: engine, store: SettingsStore(dir.path))
+            ..settings = AppSettings(downloadDir: dir.path, listenPort: 50000)
+            ..torrents = [
+              for (final state in states) _torrent(state, name: state.name),
+            ];
+      engine.controller = controller;
+      await tester.pumpWidget(_app(HomePage(controller: controller)));
+      await tester.pump();
+      return engine;
+    }
+
+    Future<void> clickWith(
+      WidgetTester tester,
+      LogicalKeyboardKey key,
+      Finder target,
+    ) async {
+      await tester.sendKeyDownEvent(key);
+      await tester.tap(target);
+      await tester.sendKeyUpEvent(key);
+      await tester.pump();
+    }
+
+    testWidgets('Ctrl and Shift pick, a click then picks too', (tester) async {
+      await open(tester);
+      expect(removeButton(), findsNothing);
+
+      await clickWith(
+        tester,
+        LogicalKeyboardKey.controlLeft,
+        row(TorrentState.downloading),
+      );
+      expect(picked(tester), ['downloading']);
+      expect(find.text(_en.selectedCount(1)), findsOneWidget);
+      expect(removeButton(), findsOneWidget);
+
+      await clickWith(
+        tester,
+        LogicalKeyboardKey.shiftLeft,
+        row(TorrentState.paused),
+      );
+      expect(picked(tester), ['downloading', 'seeding', 'paused']);
+
+      // Quickly, as a double click would be: each click counts on its own.
+      await tester.tap(row(TorrentState.seeding));
+      await tester.pump();
+      expect(picked(tester), ['downloading', 'paused']);
+      await tester.tap(row(TorrentState.seeding));
+      await tester.pump();
+      expect(picked(tester), ['downloading', 'seeding', 'paused']);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(picked(tester), isEmpty);
+      expect(removeButton(), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('the picked ones are removed together', (tester) async {
+      final engine = await open(tester);
+      await clickWith(
+        tester,
+        LogicalKeyboardKey.controlLeft,
+        row(TorrentState.seeding),
+      );
+      await clickWith(
+        tester,
+        LogicalKeyboardKey.controlLeft,
+        row(TorrentState.error),
+      );
+
+      // Cancelled: nothing goes, and they stay picked.
+      await tester.tap(removeButton());
+      await tester.pumpAndSettle();
+      expect(find.text(_en.removeManyTitle(2)), findsOneWidget);
+      await tester.tap(find.text(_en.cancel));
+      await tester.pumpAndSettle();
+      expect(engine.removed, isEmpty);
+      expect(picked(tester), ['seeding', 'error']);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.delete);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(_en.removeFiles));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, _en.remove).last);
+      await tester.pumpAndSettle();
+      expect(engine.removed, ['seeding', 'error']);
+      expect(engine.deletedFiles, isTrue);
+      expect(removeButton(), findsNothing);
+    });
+
+    testWidgets('Ctrl+A takes only what a search shows', (tester) async {
+      final engine = await open(tester);
+      await tester.enterText(find.byType(TextField).at(1), 'paused');
+      await tester.pump();
+      await tester.tapAt(const Offset(600, 880));
+      await tester.pump();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+      expect(picked(tester), ['paused']);
+
+      await tester.tap(removeButton());
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, _en.remove).last);
+      await tester.pumpAndSettle();
+      expect(engine.removed, ['paused']);
+      expect(engine.deletedFiles, isFalse);
+    });
+
+    testWidgets('a torrent that leaves the list is no longer picked', (
+      tester,
+    ) async {
+      final engine = await open(tester);
+      final button = find.byIcon(Icons.checklist_rounded);
+      await tester.tap(button);
+      await tester.pump();
+      expect(find.text(_en.selectedCount(states.length)), findsOneWidget);
+
+      final controller = engine.controller!;
+      controller.torrents = [_torrent(TorrentState.seeding, name: 'seeding')];
+      controller.notifyListeners();
+      await tester.pump();
+      expect(find.text(_en.selectedCount(1)), findsOneWidget);
+
+      await tester.tap(removeButton());
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, _en.remove).last);
+      await tester.pumpAndSettle();
+      expect(engine.removed, ['seeding']);
+    });
   });
 
   testWidgets('a row is equally tall in every state', (tester) async {
@@ -294,7 +468,7 @@ void main() {
         Builder(
           builder: (context) => TextButton(
             onPressed: () async =>
-                result = await showRemoveDialog(context, 'ubuntu.iso'),
+                result = await showRemoveDialog(context, ['ubuntu.iso']),
             child: const Text('open'),
           ),
         ),

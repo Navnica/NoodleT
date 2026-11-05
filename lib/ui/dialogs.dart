@@ -14,12 +14,12 @@ import 'format.dart';
 import 'system.dart';
 import 'theme_palette.dart';
 
-/// Returns whether the downloaded files should be deleted too, or null when
-/// cancelled.
-Future<bool?> showRemoveDialog(BuildContext context, String name) =>
+/// Asks before removing the torrents called [names]. Returns whether the
+/// downloaded files should be deleted too, or null when cancelled.
+Future<bool?> showRemoveDialog(BuildContext context, List<String> names) =>
     showDialog<bool>(
       context: context,
-      builder: (_) => _RemoveDialog(name: name),
+      builder: (_) => _RemoveDialog(names: names),
     );
 
 /// What the user picked for a torrent just added: the indexes of the [files]
@@ -102,9 +102,9 @@ Future<void> showSettingsDialog(
 );
 
 class _RemoveDialog extends StatefulWidget {
-  const _RemoveDialog({required this.name});
+  const _RemoveDialog({required this.names});
 
-  final String name;
+  final List<String> names;
 
   @override
   State<_RemoveDialog> createState() => _RemoveDialogState();
@@ -117,15 +117,38 @@ class _RemoveDialogState extends State<_RemoveDialog> {
   Widget build(BuildContext context) {
     final s = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final names = widget.names;
     return AlertDialog(
-      title: Text(s.removeTitle),
+      title: Text(
+        names.length == 1 ? s.removeTitle : s.removeManyTitle(names.length),
+      ),
       content: SizedBox(
         width: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.name, maxLines: 3, overflow: TextOverflow.ellipsis),
+            if (names.length == 1)
+              Text(names.single, maxLines: 3, overflow: TextOverflow.ellipsis)
+            else
+              // Every one is named: the files of all of them may go.
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 200),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final name in names)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 12),
             CheckboxListTile(
               value: _deleteFiles,

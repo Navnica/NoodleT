@@ -66,6 +66,27 @@
   "openFolder": "Show in folder",
   "remove": "Remove",
   "removeTitle": "Remove torrent?",
+  "removeManyTitle": "{count, plural, =1{Remove 1 torrent?} other{Remove {count} torrents?}}",
+  "@removeManyTitle": {
+    "description": "Title of the dialog that removes several picked torrents.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "select": "Select",
+  "unselect": "Deselect",
+  "selectAll": "Select all",
+  "selectedCount": "Selected: {count}",
+  "@selectedCount": {
+    "description": "How many torrents are picked for a common action.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "removeFiles": "Also delete downloaded files",
   "copy": "Copy",
   "paused": "Paused",

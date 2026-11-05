@@ -224,9 +224,16 @@ class AppController extends ChangeNotifier {
       (t.isPaused || t.state == TorrentState.error) &&
       (settings.seedAfterDownload || !t.isComplete);
 
-  void remove(Torrent torrent, {required bool deleteFiles}) {
-    _downloading.remove(torrent.id);
-    _guard(() => engine.remove(torrent.id, deleteFiles: deleteFiles));
+  void remove(Torrent torrent, {required bool deleteFiles}) =>
+      removeAll([torrent], deleteFiles: deleteFiles);
+
+  /// Removes every torrent of [group]; one that fails does not keep the rest.
+  void removeAll(Iterable<Torrent> group, {required bool deleteFiles}) {
+    for (final torrent in group) {
+      _downloading.remove(torrent.id);
+      _attempt(() => engine.remove(torrent.id, deleteFiles: deleteFiles));
+    }
+    refresh();
   }
 
   Future<void> updateSettings(AppSettings next) async {
@@ -355,6 +362,12 @@ class AppController extends ChangeNotifier {
   }
 
   void _guard(void Function() action) {
+    _attempt(action);
+    refresh();
+  }
+
+  /// Runs [action] and tells the user when it fails.
+  void _attempt(void Function() action) {
     try {
       action();
     } on EngineException catch (e) {
@@ -365,7 +378,6 @@ class AppController extends ChangeNotifier {
     } on FileSystemException catch (e) {
       _notices.add(Notice(NoticeKind.engine, e.osError?.message ?? e.message));
     }
-    refresh();
   }
 
   @override
